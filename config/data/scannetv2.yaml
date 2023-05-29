@@ -5,6 +5,7 @@ defaults:
 
 dataset: ScanNetv2
 dataset_path: ${data.dataset_root_path}/scannetv2
+scanrefer_path: ${data.dataset_root_path}/scanrefer
 raw_scene_path: ${data.dataset_path}/scans
 
 metadata:

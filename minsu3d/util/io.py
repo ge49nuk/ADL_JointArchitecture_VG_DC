@@ -1,5 +1,6 @@
 import os
 import torch
+import numpy as np
 from tqdm import tqdm
 from minsu3d.evaluation.semantic_segmentation import *
 from minsu3d.evaluation.instance_segmentation import rle_decode, rle_encode

@@ -8,9 +8,12 @@ import json
 import torch
 import hydra
 import numpy as np
+import sys
 import open3d as o3d
 from functools import partial
 from tqdm.contrib.concurrent import process_map
+from pytorch_pretrained_bert import BertTokenizer
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 
 def get_semantic_mapping_file(file_path):
@@ -62,19 +65,50 @@ def read_agg_file(file_path):
 
 def read_seg_file(seg_file):
     seg2verts = {}
+    vert2seg = {}
     with open(seg_file, 'r') as json_data:
         data = json.load(json_data)
     for vert, seg in enumerate(data['segIndices']):
         if seg not in seg2verts:
             seg2verts[seg] = []
+        vert2seg[vert] = seg
         seg2verts[seg].append(vert)
-    return seg2verts
+    return seg2verts, vert2seg
 
+def read_descr_file(desc_file, agg_file, scan):
+    with open(desc_file, 'r') as json_data:
+        data = json.load(json_data)
+    inst_descr = []
+    scan_data = data[scan]
+    for obj_id in scan_data:
+        instance = {}
+        ignored_obj = 0
+        with open(agg_file, "r") as f:
+            data = json.load(f)
+            for k, group in enumerate(data['segGroups']):
+                if k > int(obj_id):
+                    break
+                if 'floor' in group['label'] or 'wall' in group['label']:
+                    ignored_obj += 1
+            instance["object_id"] = int(obj_id) - ignored_obj
+        for ann_id in scan_data[obj_id]:
+            instance["ann_id"] = ann_id
+            descr = "[CLS] " + scan_data[obj_id][ann_id]["description"]
+            descr = descr.replace('.',' [SEP]')
+            tokenized_descr = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
+            tokens = np.array(tokenizer.tokenize(descr))
+            np.put(tokenized_descr, range(len(tokens)), tokens)
+            instance["token"] = np.array(tokenizer.convert_tokens_to_ids(tokenized_descr))
+        inst_descr.append(instance)
+    
+    return inst_descr
 
 def get_instance_ids(object_id2segs, seg2verts, sem_labels, invalid_ids):
     object_id2label_id = {}
     instance_ids = np.full(shape=len(sem_labels), fill_value=-1, dtype=np.int16)
+    instance_descr = np.full(shape=len(sem_labels), fill_value="", dtype=str)
     new_object_id = 0
+    real_id = 0
     for _, segs in object_id2segs.items():
         for seg in segs:
             verts = seg2verts[seg]
@@ -84,6 +118,7 @@ def get_instance_ids(object_id2segs, seg2verts, sem_labels, invalid_ids):
                 break
             instance_ids[verts] = new_object_id
         new_object_id += 1
+        real_id += 1
     return instance_ids
 
 
@@ -91,6 +126,7 @@ def process_one_scan(scan, cfg, split, label_map):
     mesh_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '_vh_clean_2.ply')
     agg_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '.aggregation.json')
     seg_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '_vh_clean_2.0.010000.segs.json')
+    descr_file_path = os.path.join(cfg.data.scanrefer_path, 'ScanRefer_filtered_organized.json')
 
     # read mesh_file
     xyz, rgb, normal = read_mesh_file(mesh_file_path)
@@ -98,9 +134,11 @@ def process_one_scan(scan, cfg, split, label_map):
 
     if os.path.exists(agg_file_path):
         # read seg_file
-        seg2verts = read_seg_file(seg_file_path)
+        seg2verts,vert2seg = read_seg_file(seg_file_path)
         # read agg_file
         object_id2segs, label2segs = read_agg_file(agg_file_path)
+
+        object_descr = read_descr_file(descr_file_path, agg_file_path, scan)
 
         # get semantic labels
         # create a map, skip invalid labels to make the final semantic labels consecutive
@@ -117,7 +155,7 @@ def process_one_scan(scan, cfg, split, label_map):
         # use zero as placeholders for the test scene
         sem_labels = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
         instance_ids = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
-    torch.save({'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids},
+    torch.save({'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids, 'object_descr' : object_descr}, #'vert2seg':vert2seg},
                os.path.join(cfg.data.dataset_path, split, f"{scan}.pth"))
 
 

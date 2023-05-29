@@ -5,10 +5,10 @@ defaults:
 
 log:
   WandbLogger:
-    project: SoftGroup
+    project: Joint_Arch
     name: ${experiment_name}
   TensorBoardLogger:
-    name: SoftGroup
+    name: Joint_Arch
 
 trainer:
   max_epochs: 288
@@ -18,10 +18,10 @@ lr_decay:
 
 optimizer:
     _target_: torch.optim.Adam
-    lr: 0.004
+    lr: 0.0001
 
 network:
-  module: SoftGroup
+  module: Joint_Arch
 
   m: 32 # 16 or 32
   blocks: [1, 2, 3, 4, 5, 6, 7]

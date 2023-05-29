@@ -38,7 +38,7 @@ def main(cfg):
     model = getattr(import_module("minsu3d.model"), cfg.model.network.module)(cfg)
 
     print("==> start training ...")
-    trainer.fit(model=model, datamodule=data_module, ckpt_path=cfg.model.ckpt_path)
+    trainer.fit(model=model, datamodule=data_module)
 
 
 if __name__ == '__main__':

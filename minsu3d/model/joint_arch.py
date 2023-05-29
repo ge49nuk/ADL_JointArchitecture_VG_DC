@@ -7,11 +7,23 @@ from minsu3d.common_ops.functions import softgroup_ops, common_ops
 from minsu3d.evaluation.semantic_segmentation import *
 from minsu3d.model.module import TinyUnet
 from minsu3d.model.general_model import GeneralModel, clusters_voxelization
+from pytorch_pretrained_bert import BertTokenizer, BertModel, BertForMaskedLM
+from minsu3d.model.transformer import Transformer
+from minsu3d.model.softgroup import SoftGroup
 
 
-class SoftGroup(GeneralModel):
+class Joint_Arch(GeneralModel):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self.transformer = Transformer(max_text_len=134)
+        self.transformer.to("cuda")
+        self.bert = BertModel.from_pretrained('bert-base-uncased').to("cuda")
+        self.bert.eval()
+        self.softgroup = SoftGroup(cfg=cfg)
+        checkpoint = torch.load(cfg.model.ckpt_path)
+        self.softgroup.load_state_dict(checkpoint['state_dict'])
+        for param in self.softgroup.parameters():
+            param.requires_grad = False
         output_channel = cfg.model.network.m
         self.instance_classes = cfg.data.classes - len(cfg.data.ignore_classes)
 
@@ -31,91 +43,19 @@ class SoftGroup(GeneralModel):
         self.iou_score = nn.Linear(output_channel, self.instance_classes + 1)
 
     def forward(self, data_dict):
-        # print(data_dict)
-        # sys.exit()
-        output_dict = super().forward(data_dict)
-        # if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
-        """
-            Top-down Refinement Block
-        """
-        semantic_scores = output_dict["semantic_scores"].softmax(dim=-1)
+        output_dict = self.softgroup(data_dict)
 
-        proposals_offset_list = []
-        proposals_idx_list = []
-
-        for class_id in range(self.hparams.cfg.data.classes):
-            if class_id + 1 in self.hparams.cfg.data.ignore_classes:
-                continue
-            scores = semantic_scores[:, class_id].contiguous()
-            object_idxs = (scores > self.hparams.cfg.model.network.grouping_cfg.score_thr).nonzero().view(-1)
-            if object_idxs.size(0) < self.hparams.cfg.model.network.test_cfg.min_npoint:
-                continue
-            batch_idxs_ = data_dict["vert_batch_ids"][object_idxs]
-            batch_offsets_ = torch.cumsum(torch.bincount(batch_idxs_ + 1), dim=0).int()
-            coords_ = data_dict["point_xyz"][object_idxs]
-            pt_offsets_ = output_dict["point_offsets"][object_idxs]
-            idx, start_len = common_ops.ballquery_batch_p(
-                coords_ + pt_offsets_, batch_idxs_, batch_offsets_,
-                self.hparams.cfg.model.network.grouping_cfg.radius,
-                self.hparams.cfg.model.network.grouping_cfg.mean_active
-            )
-
-            proposals_idx, proposals_offset = softgroup_ops.sg_bfs_cluster(
-                self.hparams.cfg.data.point_num_avg, idx.cpu(),
-                start_len.cpu(),
-                self.hparams.cfg.model.network.grouping_cfg.npoint_thr, class_id)
-
-            proposals_idx = proposals_idx.long().to(self.device)
-            proposals_offset = proposals_offset.to(self.device)
-            proposals_idx[:, 1] = object_idxs[proposals_idx[:, 1]]
-
-            # merge proposals
-            if len(proposals_offset_list) > 0:
-                proposals_idx[:, 0] += sum([x.size(0) for x in proposals_offset_list]) - 1
-                proposals_offset += proposals_offset_list[-1][-1]
-                proposals_offset = proposals_offset[1:]
-            if proposals_idx.size(0) > 0:
-                proposals_idx_list.append(proposals_idx)
-                proposals_offset_list.append(proposals_offset)
-        proposals_idx = torch.cat(proposals_idx_list, dim=0)
-        proposals_offset = torch.cat(proposals_offset_list)
-
-        if proposals_offset.shape[0] > self.hparams.cfg.model.network.train_cfg.max_proposal_num:
-            proposals_offset = proposals_offset[:self.hparams.cfg.model.network.train_cfg.max_proposal_num + 1]
-            proposals_idx = proposals_idx[:proposals_offset[-1]]
-            assert proposals_idx.shape[0] == proposals_offset[-1]
-
-
-        output_dict["proposals_idx"] = proposals_idx
-        output_dict["proposals_offset"] = proposals_offset
-
-        inst_feats, inst_map = clusters_voxelization(
-            clusters_idx=proposals_idx,
-            clusters_offset=proposals_offset,
-            feats=output_dict["point_features"],
-            coords=data_dict["point_xyz"],
-            device=self.device,
-            **self.hparams.cfg.model.network.instance_voxel_cfg
-        )
+        # BERT
+        with torch.no_grad():
+            encoded_layers, _ = self.bert(data_dict["descr_token"]) 
         
-        # print("FEATURES:",inst_feats)
-        # print("END_FEATURES")
-        # print(inst_map, inst_map.shape)
-        # sys.exit()
-
-        feats = self.tiny_unet(inst_feats)
-
-        # predict mask scores
-        mask_scores = self.mask_scoring_branch(feats.features)
-        output_dict["mask_scores"] = mask_scores[inst_map]
-        output_dict["instance_batch_idxs"] = feats.coordinates[:, 0][inst_map]
-
-        # predict instance cls and iou scores
-        feats = self.global_pool(feats)
-        output_dict["cls_scores"] = self.classification_branch(feats)
-        output_dict["iou_scores"] = self.iou_score(feats)
+        output_dict["descr_embedding"] = encoded_layers[-1]  # Shape: [tensor(batch_size, seq_len, emb_dim)]
+        transformer_out = self.transformer(data_dict, output_dict)
+        output_dict["VG_scores"] = transformer_out["VG_scores"]
+        #output_dict["DC_scores"] = transformer_out["DC_scores"]
 
         return output_dict
+
 
     def global_pool(self, x, expand=False):
         indices = x.coordinates[:, 0]
@@ -128,66 +68,37 @@ class SoftGroup(GeneralModel):
         return x
 
     def _loss(self, data_dict, output_dict):
-        losses = super()._loss(data_dict, output_dict)
+        losses = self.softgroup._loss(data_dict, output_dict)
 
-        # if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
+        word_ids = data_dict["descr_token"][0]
+        vg_scores = output_dict["VG_scores"]
+        #dc_scores = output_dict["DC_scores"]
+        queried_obj = data_dict["queried_obj"][0]
+
+
+        # COMPUTE MOST ACCURATE OBJECT PROPOSAL
         proposals_idx = output_dict["proposals_idx"][:, 1].int().contiguous()
         proposals_offset = output_dict["proposals_offset"]
-
         # calculate iou of clustered instance
         ious_on_cluster = common_ops.get_mask_iou_on_cluster(
             proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"]
         )
 
-        # filter out background instances
-        fg_inds = (data_dict["instance_semantic_cls"] != -1)
-        fg_instance_cls = data_dict["instance_semantic_cls"][fg_inds]
-        fg_ious_on_cluster = ious_on_cluster[:, fg_inds]
+        ious_queried_obj = ious_on_cluster[:,queried_obj]
+        best_proposal = torch.argmax(ious_queried_obj)
 
-        # assign proposal to gt idx. -1: negative, 0 -> num_gts - 1: positive
-        num_proposals = fg_ious_on_cluster.size(0)
-        assigned_gt_inds = fg_ious_on_cluster.new_full((num_proposals,), -1, dtype=torch.long)
+        VG_target = torch.zeros(vg_scores.shape)
+        VG_target[best_proposal] = 1.0
+        VG_loss = self.transformer.loss_criterion(vg_scores, VG_target.to("cuda"))
+        # print("PREDICTED",vg_scores, "TRUTH", VG_target)
+        # word_ids = nn.functional.one_hot(word_ids, self.transformer.size_vocab)
+        # word_ids = torch.tensor(word_ids, dtype=torch.float32)
+        #DC_loss = self.transformer.loss_criterion(dc_scores, word_ids)
 
-        # overlap > thr on fg instances are positive samples
-        max_iou, argmax_iou = fg_ious_on_cluster.max(1)
-        pos_inds = max_iou >= self.hparams.cfg.model.network.train_cfg.pos_iou_thr
-        assigned_gt_inds[pos_inds] = argmax_iou[pos_inds]
+        losses["VG_loss"] = VG_loss
+        #losses["DC_loss"] = DC_loss
 
-        """classification loss"""
-        # follow detection convention: 0 -> K - 1 are fg, K is bg
-        labels = fg_instance_cls.new_full((num_proposals,), self.instance_classes)
-        pos_inds = assigned_gt_inds >= 0
-        labels[pos_inds] = fg_instance_cls[assigned_gt_inds[pos_inds]]
-        labels = labels.long()
-        losses["classification_loss"] = nn.functional.cross_entropy(output_dict["cls_scores"], labels)
-
-        """mask scoring loss"""
-        mask_cls_label = labels[output_dict["instance_batch_idxs"].long()]
-        slice_inds = torch.arange(0, mask_cls_label.size(0), dtype=torch.long, device=mask_cls_label.device)
-        mask_scores_sigmoid_slice = output_dict["mask_scores"].sigmoid()[slice_inds, mask_cls_label]
-
-        mask_label, mask_label_mask = common_ops.get_mask_label(
-            proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_semantic_cls"],
-            data_dict["instance_num_point"], ious_on_cluster,
-            -1, self.hparams.cfg.model.network.train_cfg.pos_iou_thr
-        )
-
-        mask_scoring_loss = nn.functional.binary_cross_entropy(
-            mask_scores_sigmoid_slice, mask_label.float(), weight=mask_label_mask, reduction="sum"
-        )
-        mask_scoring_loss /= (torch.count_nonzero(mask_label_mask) + 1)
-        losses["mask_scoring_loss"] = mask_scoring_loss
-        """iou scoring loss"""
-        ious = common_ops.get_mask_iou_on_pred(
-            proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"],
-            mask_scores_sigmoid_slice.detach()
-        )
-        slice_inds = torch.arange(0, labels.size(0), dtype=torch.long, device=labels.device)
-        iou_score_weight = labels < self.instance_classes
-        iou_score_slice = output_dict["iou_scores"][slice_inds, labels]
-        iou_scoring_loss = nn.functional.mse_loss(iou_score_slice, ious[:, fg_inds].max(1)[0], reduction="none")
-        losses["iou_scoring_loss"] = iou_scoring_loss[iou_score_weight].sum() / (iou_score_weight.count_nonzero() + 1)
-
+        print("VG LOSS:",VG_loss)
         return losses
 
     def validation_step(self, data_dict, idx):

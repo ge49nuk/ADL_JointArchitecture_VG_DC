@@ -1,4 +1,5 @@
 import torch
+import sys
 import MinkowskiEngine as ME
 import pytorch_lightning as pl
 from importlib import import_module
@@ -22,7 +23,7 @@ class DataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            self.train_set, batch_size=self.data_cfg.data.batch_size, shuffle=True,
+            self.train_set, batch_size=self.data_cfg.data.batch_size, shuffle=False,
             pin_memory=True, collate_fn=_sparse_collate_fn, num_workers=self.data_cfg.data.num_workers
         )
 
@@ -55,6 +56,8 @@ def _sparse_collate_fn(batch):
     voxel_point_map_list = []
     num_voxel_batch = 0
     scan_ids = []
+    descr_token = []
+    queried_obj = []
 
     for i, b in enumerate(batch):
         scan_ids.append(b["scan_id"])
@@ -80,6 +83,10 @@ def _sparse_collate_fn(batch):
 
         instance_cls.extend(b["instance_semantic_cls"])
 
+        descr_token.append(torch.tensor(b["descr_token"]))
+
+        queried_obj.append(b["queried_obj"])
+
     data['scan_ids'] = scan_ids
     data["point_xyz"] = torch.cat(point_xyz, dim=0)
     data["vert_batch_ids"] = torch.cat(vert_batch_ids, dim=0)
@@ -90,6 +97,9 @@ def _sparse_collate_fn(batch):
     data["instance_num_point"] = torch.cat(instance_num_point, dim=0)
     data["instance_offsets"] = torch.tensor(instance_offsets, dtype=torch.int32)
     data["instance_semantic_cls"] = torch.tensor(instance_cls, dtype=torch.int16)
+    data["descr_token"] = torch.stack(descr_token)
+    data["queried_obj"] = queried_obj
+    data["num_instance"] = total_num_inst
 
     data["voxel_xyz"], data["voxel_features"] = ME.utils.sparse_collate(
         coords=voxel_xyz_list, feats=voxel_features_list
