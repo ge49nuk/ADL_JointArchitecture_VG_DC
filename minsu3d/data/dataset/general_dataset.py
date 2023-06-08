@@ -21,18 +21,18 @@ class GeneralDataset(Dataset):
     def _load_from_disk(self):
         with open(getattr(self.cfg.data.metadata, f"{self.split}_list")) as f:
             self.scene_names = [line.strip() for line in f]
-        # print(self.scene_names)
-        # quit()
         self.scenes = []
         for scene_name in tqdm(self.scene_names, desc=f"Loading {self.split} data from disk"):
             scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}.pth")
             scene_info = torch.load(scene_path)
+            scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
+            scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
+            scene_info["scene_id"] = scene_name
             for i in range(scene_info['num_descr']):
+                scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
-                scene = torch.load(scene_path)
-                scene["xyz"] -= scene["xyz"].mean(axis=0)
-                scene["rgb"] = scene["rgb"].astype(np.float32) / 127.5 - 1
-                scene["scene_id"] = scene_name
+                scene_descr = torch.load(scene_path)
+                scene["object_descr"] = scene_descr["object_descr"]
                 self.scenes.append(scene)
 
     def __len__(self):
@@ -97,7 +97,6 @@ class GeneralDataset(Dataset):
 
         instance_ids = scene["instance_ids"].astype(np.int16)  # (N, )
         sem_labels = scene["sem_labels"].astype(np.int16)  # (N, )
-
         descr_dict = scene["object_descr"]
         descr_token = descr_dict["token"]   
         queried_obj = descr_dict["object_id"]

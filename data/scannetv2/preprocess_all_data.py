@@ -161,10 +161,10 @@ def process_one_scan(scan, cfg, split, label_map):
         # use zero as placeholders for the test scene
         sem_labels = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
         instance_ids = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
-    torch.save({'num_descr':len(object_descr)}, #'vert2seg':vert2seg},
+    torch.save({'num_descr':len(object_descr), 'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids},#'vert2seg':vert2seg},
                os.path.join(cfg.data.dataset_path, split, f"{scan}.pth"))
     for i, desc in enumerate(object_descr):
-        torch.save({'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids, 'object_descr' : desc},
+        torch.save({'object_descr' : desc},
                os.path.join(cfg.data.dataset_path, split, f"{scan}_{i}.pth"))
 
 
