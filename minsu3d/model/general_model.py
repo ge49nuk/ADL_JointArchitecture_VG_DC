@@ -63,13 +63,15 @@ class GeneralModel(pl.LightningModule):
             "train/total_loss", total_loss, on_step=False, sync_dist=True,
             on_epoch=True, batch_size=len(data_dict["scan_ids"])
         )
+        self.log("train_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True,  batch_size=len(data_dict["scan_ids"]))
         return total_loss
 
-    def on_train_epoch_end(self):
-        cosine_lr_decay(
-            self.trainer.optimizers[0], self.hparams.cfg.model.optimizer.lr, self.current_epoch,
-            self.hparams.cfg.model.lr_decay.decay_start_epoch, self.hparams.cfg.model.trainer.max_epochs, 1e-6
-        )
+    # def on_train_epoch_end(self):
+    #     cosine_lr_decay(
+    #         self.trainer.optimizers[0], self.hparams.cfg.model.optimizer.lr, self.current_epoch,
+    #         self.hparams.cfg.model.lr_decay.decay_start_epoch, self.hparams.cfg.model.trainer.max_epochs, 1e-6
+    #     )
+        
 
     def validation_step(self, data_dict, idx):
         pass

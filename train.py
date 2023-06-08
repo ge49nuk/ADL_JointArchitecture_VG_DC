@@ -5,6 +5,7 @@ from minsu3d.callback import *
 from importlib import import_module
 from minsu3d.data.data_module import DataModule
 from pytorch_lightning.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 
 def init_callbacks(cfg):

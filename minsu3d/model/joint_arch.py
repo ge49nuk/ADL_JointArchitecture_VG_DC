@@ -1,13 +1,14 @@
 import numpy as np
 import torch.nn as nn
 import sys
+import time
 from minsu3d.evaluation.instance_segmentation import get_gt_instances, rle_encode
 from minsu3d.evaluation.object_detection import get_gt_bbox
 from minsu3d.common_ops.functions import softgroup_ops, common_ops
 from minsu3d.evaluation.semantic_segmentation import *
 from minsu3d.model.module import TinyUnet
 from minsu3d.model.general_model import GeneralModel, clusters_voxelization
-from pytorch_pretrained_bert import BertTokenizer, BertModel, BertForMaskedLM
+from transformers import BertConfig, BertModel
 from minsu3d.model.transformer import Transformer
 from minsu3d.model.softgroup import SoftGroup
 
@@ -17,9 +18,10 @@ class Joint_Arch(GeneralModel):
         super().__init__(cfg)
         self.transformer = Transformer(max_text_len=134)
         self.transformer.to("cuda")
-        self.bert = BertModel.from_pretrained('bert-base-uncased').to("cuda")
-        self.bert.eval()
+        configuration = BertConfig()
+        self.bert = BertModel(configuration).to("cuda")
         self.softgroup = SoftGroup(cfg=cfg)
+        self.softgroup_past = {}
         checkpoint = torch.load(cfg.model.ckpt_path)
         self.softgroup.load_state_dict(checkpoint['state_dict'])
         for param in self.softgroup.parameters():
@@ -43,17 +45,24 @@ class Joint_Arch(GeneralModel):
         self.iou_score = nn.Linear(output_channel, self.instance_classes + 1)
 
     def forward(self, data_dict):
-        output_dict = self.softgroup(data_dict)
+        scene = data_dict["scan_ids"][0]
+        #SoftGroup
+        self.softgroup.eval()
+        if scene in self.softgroup_past:
+            output_dict = self.softgroup_past[scene]
+        else:
+            output_dict = self.softgroup(data_dict)
+            self.softgroup_past[scene] = output_dict
 
         # BERT
         with torch.no_grad():
-            encoded_layers, _ = self.bert(data_dict["descr_token"]) 
-        
-        output_dict["descr_embedding"] = encoded_layers[-1]  # Shape: [tensor(batch_size, seq_len, emb_dim)]
+            self.bert.eval()
+            bert_out = self.bert(data_dict["descr_token"]) 
+        output_dict["descr_embedding"] = bert_out[0]                # Shape: [tensor(batch_size, seq_len, emb_dim)]
         transformer_out = self.transformer(data_dict, output_dict)
         output_dict["VG_scores"] = transformer_out["VG_scores"]
         #output_dict["DC_scores"] = transformer_out["DC_scores"]
-
+    
         return output_dict
 
 
@@ -68,12 +77,14 @@ class Joint_Arch(GeneralModel):
         return x
 
     def _loss(self, data_dict, output_dict):
-        losses = self.softgroup._loss(data_dict, output_dict)
+        losses = {}
 
-        word_ids = data_dict["descr_token"][0]
-        vg_scores = output_dict["VG_scores"]
+        # word_ids = data_dict["descr_token"][0]
         #dc_scores = output_dict["DC_scores"]
+        
+        vg_scores = output_dict["VG_scores"]
         queried_obj = data_dict["queried_obj"][0]
+
 
 
         # COMPUTE MOST ACCURATE OBJECT PROPOSAL
@@ -84,21 +95,25 @@ class Joint_Arch(GeneralModel):
             proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"]
         )
 
-        ious_queried_obj = ious_on_cluster[:,queried_obj]
-        best_proposal = torch.argmax(ious_queried_obj)
 
-        VG_target = torch.zeros(vg_scores.shape)
-        VG_target[best_proposal] = 1.0
+        best_proposals = []
+        for o in queried_obj:
+            ious_queried_obj = ious_on_cluster[:,o]
+            best_proposals.append(torch.argmax(ious_queried_obj))
+
+        VG_target = torch.zeros((vg_scores.shape))
+        for p in best_proposals:
+            VG_target[p] = 1.0 / (len(best_proposals))
         VG_loss = self.transformer.loss_criterion(vg_scores, VG_target.to("cuda"))
-        # print("PREDICTED",vg_scores, "TRUTH", VG_target)
+        
+        # print("PREDICTED",vg_scores, "TRUTH", VG_target, "QUERIED", data_dict["queried_obj"])
         # word_ids = nn.functional.one_hot(word_ids, self.transformer.size_vocab)
         # word_ids = torch.tensor(word_ids, dtype=torch.float32)
         #DC_loss = self.transformer.loss_criterion(dc_scores, word_ids)
 
         losses["VG_loss"] = VG_loss
-        #losses["DC_loss"] = DC_loss
-
-        print("VG LOSS:",VG_loss)
+        #losses["DC_loss"]  = DC_loss
+        # print("VG LOSS: {:.4f}".format(VG_loss.item()))
         return losses
 
     def validation_step(self, data_dict, idx):

@@ -26,10 +26,14 @@ class GeneralDataset(Dataset):
         self.scenes = []
         for scene_name in tqdm(self.scene_names, desc=f"Loading {self.split} data from disk"):
             scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}.pth")
-            scene = torch.load(scene_path)
-            scene["xyz"] -= scene["xyz"].mean(axis=0)
-            scene["rgb"] = scene["rgb"].astype(np.float32) / 127.5 - 1
-            self.scenes.append(scene)
+            scene_info = torch.load(scene_path)
+            for i in range(scene_info['num_descr']):
+                scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
+                scene = torch.load(scene_path)
+                scene["xyz"] -= scene["xyz"].mean(axis=0)
+                scene["rgb"] = scene["rgb"].astype(np.float32) / 127.5 - 1
+                scene["scene_id"] = scene_name
+                self.scenes.append(scene)
 
     def __len__(self):
         return len(self.scenes)
@@ -84,8 +88,8 @@ class GeneralDataset(Dataset):
         return num_instance, instance_center_xyz, instance_num_point, instance_cls
 
     def __getitem__(self, idx):
-        scene_id = self.scene_names[idx]
         scene = self.scenes[idx]
+        scene_id =scene["scene_id"]
 
         point_xyz = scene["xyz"].astype(np.float32)  # (N, 3)
         colors = scene["rgb"].astype(np.float32)  # (N, 3)
@@ -94,9 +98,7 @@ class GeneralDataset(Dataset):
         instance_ids = scene["instance_ids"].astype(np.int16)  # (N, )
         sem_labels = scene["sem_labels"].astype(np.int16)  # (N, )
 
-        random.seed(rand_descr_seed)
-        # descr_dict = random.choice(scene["object_descr"])
-        descr_dict = scene["object_descr"][0]
+        descr_dict = scene["object_descr"]
         descr_token = descr_dict["token"]   
         queried_obj = descr_dict["object_id"]
         

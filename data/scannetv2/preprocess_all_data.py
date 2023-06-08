@@ -12,7 +12,7 @@ import sys
 import open3d as o3d
 from functools import partial
 from tqdm.contrib.concurrent import process_map
-from pytorch_pretrained_bert import BertTokenizer
+from transformers import BertTokenizer
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 
@@ -80,6 +80,7 @@ def read_descr_file(desc_file, agg_file, scan):
         data = json.load(json_data)
     inst_descr = []
     scan_data = data[scan]
+    seen_desc = {}
     for obj_id in scan_data:
         instance = {}
         ignored_obj = 0
@@ -90,16 +91,21 @@ def read_descr_file(desc_file, agg_file, scan):
                     break
                 if 'floor' in group['label'] or 'wall' in group['label']:
                     ignored_obj += 1
-            instance["object_id"] = int(obj_id) - ignored_obj
+            instance["object_id"] = [int(obj_id) - ignored_obj]
         for ann_id in scan_data[obj_id]:
-            instance["ann_id"] = ann_id
+            instance_cpy = instance.copy()
+            instance_cpy["ann_id"] = ann_id
             descr = "[CLS] " + scan_data[obj_id][ann_id]["description"]
             descr = descr.replace('.',' [SEP]')
+            if descr in seen_desc:
+                inst_descr[seen_desc[descr]]["object_id"].append(instance["object_id"][0])
+                continue
             tokenized_descr = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
             tokens = np.array(tokenizer.tokenize(descr))
             np.put(tokenized_descr, range(len(tokens)), tokens)
-            instance["token"] = np.array(tokenizer.convert_tokens_to_ids(tokenized_descr))
-        inst_descr.append(instance)
+            instance_cpy["token"] = np.array(tokenizer.convert_tokens_to_ids(tokenized_descr))
+            seen_desc[descr] = len(inst_descr)
+            inst_descr.append(instance_cpy)
     
     return inst_descr
 
@@ -155,8 +161,11 @@ def process_one_scan(scan, cfg, split, label_map):
         # use zero as placeholders for the test scene
         sem_labels = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
         instance_ids = np.full(shape=num_verts, fill_value=-1, dtype=np.int16)
-    torch.save({'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids, 'object_descr' : object_descr}, #'vert2seg':vert2seg},
+    torch.save({'num_descr':len(object_descr)}, #'vert2seg':vert2seg},
                os.path.join(cfg.data.dataset_path, split, f"{scan}.pth"))
+    for i, desc in enumerate(object_descr):
+        torch.save({'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids, 'object_descr' : desc},
+               os.path.join(cfg.data.dataset_path, split, f"{scan}_{i}.pth"))
 
 
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
