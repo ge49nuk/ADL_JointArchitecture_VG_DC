@@ -48,7 +48,7 @@ class PositionalEncoding(nn.Module):
 
     
 class Transformer(nn.Module):
-    def __init__(self, max_text_len, dim_model=64, dim_ptfeats=32, dim_wdfeats=768, size_vocab=30522, nlayers=2, dropout_p=0.1, nhead=1):
+    def __init__(self, max_text_len, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
         super().__init__()
 
         self.model_type = "Transformer"
@@ -60,37 +60,27 @@ class Transformer(nn.Module):
         
         # Layers
         # Transform point and word to have dimension=dim_model
-        self.point_to_model = nn.Linear(self.dim_ptfeats, self.dim_model)
-        self.word_to_model = nn.Linear(self.dim_wdfeats, self.dim_model)
+        self.point_to_model = nn.Sequential(
+            nn.Linear(self.dim_ptfeats, 256),
+            nn.Linear(256, self.dim_model)
+        )
+        self.word_to_model = nn.Sequential(
+            nn.Linear(self.dim_wdfeats, 512),
+            nn.Linear(512, self.dim_model)
+        )
         # Transformer encoder
         self.positional_encoder = PositionalEncoding(self.dim_model, dropout_p, max_len=self.max_text_len)
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.dim_model, nhead=nhead)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
-        # Decoder layer
-        self.grdhead = nn.Sequential(nn.Linear(self.dim_model, self.dim_ptfeats),nn.Linear(self.dim_ptfeats,1))         # One score for each box token
+        # Decoder layer: One score for each box token
+        self.grdhead = nn.Sequential(
+            nn.Linear(self.dim_model, 256),
+            nn.Linear(256, self.dim_ptfeats),
+            nn.Linear(self.dim_ptfeats, 1)
+        )
         self.caphead = nn.Linear(self.dim_model, self.size_vocab)  # (#Vocab) scores for each text token
         # Define loss criterion
         self.loss_criterion = nn.CrossEntropyLoss()
-
-
-        #TEST
-        self.dim_test = 32
-        self.point_to_test = nn.Linear(self.dim_ptfeats, self.dim_test)
-        self.word_to_emb = nn.Sequential(nn.Linear(self.max_text_len * self.dim_wdfeats, self.dim_test))
-        self.lin_Test = nn.Sequential(
-                                      nn.Linear((self.max_text_len+1) * self.dim_test, 256), 
-                                      nn.BatchNorm1d(256),
-                                      nn.ReLU(),
-                                    #   nn.Dropout(),
-                                      nn.Linear(256,256), 
-                                      nn.BatchNorm1d(256),
-                                      nn.ReLU(),
-                                    #   nn.Dropout(),
-                                      nn.Linear(256,256), 
-                                      nn.BatchNorm1d(256),
-                                      nn.ReLU(),
-                                    #   nn.Dropout(),
-                                      nn.Linear(256,2))
 
         # self.init_weights()
 
@@ -109,57 +99,31 @@ class Transformer(nn.Module):
         point_features_chunks = torch.tensor_split(point_features, counts.cpu(), dim=0)
         box_tokens = torch.stack([chunk.mean(dim=0) for chunk in point_features_chunks], dim=0)
         assert box_tokens.size() == (num_proposals, self.dim_ptfeats)
-    
-
-        # #LINEAR TEST MODEL
-        # assert box_tokens.size() == (num_proposals, self.dim_test)
-        # text_tokens = output_dict["descr_embedding"][0]
-        # assert text_tokens.shape == (self.max_text_len, self.dim_wdfeats)
-        # text_tokens = text_tokens[:,:self.dim_test*2:2].reshape((self.max_text_len, self.dim_test))
-
-        # global_box_token = box_tokens.mean(dim=0, keepdim=True)
-        # global_visual_cue = text_tokens
-
-        # global_visual_cue[:] += global_box_token
-        # assert global_visual_cue.shape == (self.max_text_len, self.dim_test)
-
-        # VG_tokens = torch.zeros((num_proposals, (self.max_text_len+1) * self.dim_test))
-        # for i in range(num_proposals):
-        #     VG_token = torch.cat((box_tokens[i], global_visual_cue.flatten()))
-        #     VG_tokens[i] = VG_token
-    
-
-        # out = self.lin_Test(VG_tokens.to("cuda"))
-
-        # return {"VG_scores": out}
-
         
         box_tokens = self.point_to_model(box_tokens)
         assert box_tokens.size() == (num_proposals, self.dim_model)
-        # prepared: (box_tokens, unique_proposals_idx)
+        # Prepared: (box_tokens, unique_proposals_idx)
         
         # Get text tokens:
         text_tokens = output_dict["descr_embedding"][0]  # word embeddings start with [CLS]
-        # word_ids = data_dict["descr_token"][0]           # word ids from vocab
         assert text_tokens.shape == (self.max_text_len, self.dim_wdfeats)
         text_tokens = self.word_to_model(text_tokens)
         assert text_tokens.shape == (self.max_text_len, self.dim_model)
-        text_tokens = self.positional_encoder(text_tokens.unsqueeze(1))
-        text_tokens = text_tokens[:,0]
+        # text_tokens = self.positional_encoder(text_tokens.unsqueeze(1))
+        # text_tokens = text_tokens[:,0]
         assert text_tokens.shape == (self.max_text_len, self.dim_model)
-        # prepared: (queried_obj, text_tokens, word_ids)
+        # Prepared: (text_tokens)
     
 
         # Visual grounding pass
         global_box_token = box_tokens.mean(dim=0, keepdim=True)
-        global_visual_cue = text_tokens
-        global_visual_cue[:] += global_box_token
+        global_visual_cue = text_tokens + global_box_token
         VG_tokens = torch.cat((box_tokens, global_visual_cue), dim=0)
         assert VG_tokens.size() == (num_proposals + self.max_text_len, self.dim_model)
         output_VG_tokens = self.transformer_encoder(VG_tokens)
         output_box_tokens = output_VG_tokens[:num_proposals]
         assert output_box_tokens.size() == (num_proposals, self.dim_model)
-        VG_scores = self.grdhead(output_box_tokens).flatten()
+        VG_scores = (self.grdhead(output_box_tokens)).flatten()
         assert VG_scores.size() == (num_proposals,)
         
         # # Dense captioning pass

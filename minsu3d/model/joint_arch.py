@@ -26,6 +26,8 @@ class Joint_Arch(GeneralModel):
         self.softgroup.load_state_dict(checkpoint['state_dict'])
         for param in self.softgroup.parameters():
             param.requires_grad = False
+        for param in self.bert.parameters():
+            param.requires_grad = False
         output_channel = cfg.model.network.m
         self.instance_classes = cfg.data.classes - len(cfg.data.ignore_classes)
 
