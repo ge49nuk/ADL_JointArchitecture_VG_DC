@@ -61,10 +61,29 @@ class Joint_Arch(GeneralModel):
             self.bert.eval()
             bert_out = self.bert(data_dict["descr_token"]) 
         output_dict["descr_embedding"] = bert_out[0]                # Shape: [tensor(batch_size, seq_len, emb_dim)]
+
+        # COMPUTE MOST ACCURATE OBJECT PROPOSAL
+        queried_obj = data_dict["queried_obj"][0]
+        proposals_idx = output_dict["proposals_idx"][:, 1].int().contiguous()
+        proposals_offset = output_dict["proposals_offset"]
+        # calculate iou of clustered instance
+        ious_on_cluster = common_ops.get_mask_iou_on_cluster(
+            proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"]
+        )
+        # Collect proposals of highest IoU with GT
+        best_proposals = []
+        for o in queried_obj:
+            ious_queried_obj = ious_on_cluster[:,o]
+            best_proposals.append(torch.argmax(ious_queried_obj))
+        output_dict["target_proposal"] = best_proposals
+
+        # Transformer
         transformer_out = self.transformer(data_dict, output_dict)
         output_dict["VG_scores"] = transformer_out["VG_scores"]
-        #output_dict["DC_scores"] = transformer_out["DC_scores"]
-    
+        output_dict["DC_scores"] = transformer_out["DC_scores"]
+        output_dict["VG_loss"] = transformer_out["VG_loss"]
+        output_dict["DC_loss"] = transformer_out["DC_loss"]
+        
         return output_dict
 
 
@@ -84,36 +103,14 @@ class Joint_Arch(GeneralModel):
         # word_ids = data_dict["descr_token"][0]
         #dc_scores = output_dict["DC_scores"]
         
-        vg_scores = output_dict["VG_scores"]
-        queried_obj = data_dict["queried_obj"][0]
-
-
-
-        # COMPUTE MOST ACCURATE OBJECT PROPOSAL
-        proposals_idx = output_dict["proposals_idx"][:, 1].int().contiguous()
-        proposals_offset = output_dict["proposals_offset"]
-        # calculate iou of clustered instance
-        ious_on_cluster = common_ops.get_mask_iou_on_cluster(
-            proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"]
-        )
-
-
-        best_proposals = []
-        for o in queried_obj:
-            ious_queried_obj = ious_on_cluster[:,o]
-            best_proposals.append(torch.argmax(ious_queried_obj))
-
-        VG_target = torch.zeros((vg_scores.shape))
-        for p in best_proposals:
-            VG_target[p] = 1.0 / (len(best_proposals))
-        VG_loss = self.transformer.loss_criterion(vg_scores, VG_target.to("cuda"))
+        losses["VG_loss"] = output_dict["VG_loss"]
+        losses["DC_loss"] = output_dict["DC_loss"]
         
         # print("PREDICTED",vg_scores, "TRUTH", VG_target, "QUERIED", data_dict["queried_obj"])
         # word_ids = nn.functional.one_hot(word_ids, self.transformer.size_vocab)
         # word_ids = torch.tensor(word_ids, dtype=torch.float32)
         #DC_loss = self.transformer.loss_criterion(dc_scores, word_ids)
 
-        losses["VG_loss"] = VG_loss
         #losses["DC_loss"]  = DC_loss
         # print("VG LOSS: {:.4f}".format(VG_loss.item()))
         return losses

@@ -3,82 +3,73 @@ import torch.nn as nn
 import math
 
 class PositionalEncoding(nn.Module):
-    r"""Inject some information about the relative or absolute position of the tokens in the sequence.
-        The positional encodings have the same dimension as the embeddings, so that the two can be summed.
-        Here, we use sine and cosine functions of different frequencies.
-    .. math:
-        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
-        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
-        \text{where pos is the word position and i is the embed idx)
-    Args:
-        d_model: the embed dim (required).
-        dropout: the dropout value (default=0.1).
-        max_len: the max. length of the incoming sequence (default=5000).
-    Examples:
-        >>> pos_encoder = PositionalEncoding(d_model)
-    """
-
-    def __init__(self, d_model, dropout=0.1, max_len=134):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        r"""Inputs of forward function
-        Args:
-            x: the sequence fed to the positional encoder model (required).
-        Shape:
-            x: [sequence length, batch size, embed dim]
-            output: [sequence length, batch size, embed dim]
-        Examples:
-            >>> output = pos_encoder(x)
-        """
-
-        x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
+    def __init__(self, dim_model, dropout_p, max_len):
+        super().__init__()
+        # dim_model: the embedding dimension
+        # max_len: the max. length of the incoming sequence
+        # dropout_p: dropout probability
+        
+        self.dropout = nn.Dropout(dropout_p)
+        
+        # Encoding - From formula
+        pos_encoding = torch.zeros(max_len, dim_model)
+        positions_list = torch.arange(0, max_len, dtype=torch.float).view(-1, 1) # 0, 1, 2, 3, 4, 5
+        division_term = torch.exp(torch.arange(0, dim_model, 2).float() * (-math.log(10000.0)) / dim_model) # 1000^(2i/dim_model)
+        
+        # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
+        pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
+        
+        # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
+        pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
+        
+        # Saving buffer (same as parameter without gradients needed)
+        pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
+        self.register_buffer("pos_encoding", pos_encoding)
+        
+    def forward(self, token_embedding: torch.tensor) -> torch.tensor:
+        # token_embedding: size(sequence_len, dim_emb)
+        # Residual connection + pos encoding
+        return self.dropout(token_embedding + self.pos_encoding[:token_embedding.size(0), :])
 
 
 
     
 class Transformer(nn.Module):
-    def __init__(self, max_text_len, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
+    def __init__(self, max_text_len=134, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
         super().__init__()
 
         self.model_type = "Transformer"
         self.dim_model = dim_model
         self.dim_ptfeats = dim_ptfeats
         self.dim_wdfeats = dim_wdfeats
-        self.max_text_len = max_text_len
         self.size_vocab = size_vocab
         
         # Layers
         # Transform point and word to have dimension=dim_model
         self.point_to_model = nn.Sequential(
-            nn.Linear(self.dim_ptfeats, 256),
-            nn.Linear(256, self.dim_model)
+            nn.Linear(self.dim_ptfeats, 64),
+            nn.Linear(64, self.dim_model)
         )
         self.word_to_model = nn.Sequential(
-            nn.Linear(self.dim_wdfeats, 512),
-            nn.Linear(512, self.dim_model)
+            nn.Linear(self.dim_wdfeats, 640),
+            nn.Linear(640, self.dim_model)
         )
         # Transformer encoder
-        self.positional_encoder = PositionalEncoding(self.dim_model, dropout_p, max_len=self.max_text_len)
+        self.positional_encoder = PositionalEncoding(self.dim_model, dropout_p, max_len=max_text_len)
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.dim_model, nhead=nhead)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
         # Decoder layer: One score for each box token
         self.grdhead = nn.Sequential(
-            nn.Linear(self.dim_model, 256),
-            nn.Linear(256, self.dim_ptfeats),
+            nn.Linear(self.dim_model, 64),
+            nn.Linear(64, self.dim_ptfeats),
             nn.Linear(self.dim_ptfeats, 1)
         )
-        self.caphead = nn.Linear(self.dim_model, self.size_vocab)  # (#Vocab) scores for each text token
+        # Decoder layer: (#Vocab) scores for each text token
+        self.caphead = nn.Sequential(
+            nn.Linear(self.dim_model, 640),
+            nn.Linear(640, self.dim_ptfeats),
+            nn.Linear(self.dim_ptfeats, self.size_vocab)
+        )
         # Define loss criterion
         self.loss_criterion = nn.CrossEntropyLoss()
 
@@ -105,41 +96,63 @@ class Transformer(nn.Module):
         # Prepared: (box_tokens, unique_proposals_idx)
         
         # Get text tokens:
-        text_tokens = output_dict["descr_embedding"][0]  # word embeddings start with [CLS]
-        assert text_tokens.shape == (self.max_text_len, self.dim_wdfeats)
+        text_tokens = output_dict["descr_embedding"][0]  # word embeddings from BERT (start/end with [CLS]/[SEP], variable length)
+        text_tokens = text_tokens[:-1] # Taken the first N-1 tokens as input, which means ignoring [SEP]
+        len_text_tokens = text_tokens.shape[0]
+        assert text_tokens.shape == (len_text_tokens, self.dim_wdfeats)
         text_tokens = self.word_to_model(text_tokens)
-        assert text_tokens.shape == (self.max_text_len, self.dim_model)
+        assert text_tokens.shape == (len_text_tokens, self.dim_model)
         # text_tokens = self.positional_encoder(text_tokens.unsqueeze(1))
         # text_tokens = text_tokens[:,0]
-        assert text_tokens.shape == (self.max_text_len, self.dim_model)
+        # assert text_tokens.shape == (len_text_tokens, self.dim_model)
         # Prepared: (text_tokens)
     
+        # Get target proposals:
+        target_proposals = output_dict["target_proposal"]
+        num_target_proposals = len(target_proposals)
+        # Prepared: (target_proposals, num_target_proposals)
 
         # Visual grounding pass
         global_box_token = box_tokens.mean(dim=0, keepdim=True)
         global_visual_cue = text_tokens + global_box_token
         VG_tokens = torch.cat((box_tokens, global_visual_cue), dim=0)
-        assert VG_tokens.size() == (num_proposals + self.max_text_len, self.dim_model)
+        assert VG_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
         output_VG_tokens = self.transformer_encoder(VG_tokens)
         output_box_tokens = output_VG_tokens[:num_proposals]
         assert output_box_tokens.size() == (num_proposals, self.dim_model)
         VG_scores = (self.grdhead(output_box_tokens)).flatten()
         assert VG_scores.size() == (num_proposals,)
+        # Compute VG loss
+        VG_target = torch.zeros((VG_scores.shape))
+        for p in target_proposals:
+            VG_target[p] = 1.0 / num_target_proposals
+        VG_loss = self.loss_criterion(VG_scores, VG_target.to("cuda"))
         
-        # # Dense captioning pass
-        # queried_box_token = box_tokens[queried_obj]
-        # queried_box_token = queried_box_token.view(1, -1)
-        # captioning_cue = text_tokens + queried_box_token
-        # DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
-        # assert DC_tokens.size() == (num_proposals + self.max_text_len, self.dim_model)
-        # mask = self.get_seq2seq_mask(num_proposals, self.max_text_len)
-        # output_DC_tokens = self.transformer_encoder(DC_tokens, mask.to("cuda"))
-        # output_text_tokens = output_DC_tokens[num_proposals:]
-        # assert output_text_tokens.size() == (self.max_text_len, self.dim_model)
-        # DC_scores = self.caphead(output_text_tokens)
-        # assert DC_scores.size() == (self.max_text_len, self.size_vocab)
-        
-        return {"VG_scores": VG_scores}#, "DC_scores": DC_scores}
+        # Dense captioning pass
+        DC_loss = 0.0
+        if num_target_proposals > 0:
+            for i, target_proposal in enumerate(target_proposals):
+                target_box_token = box_tokens[i]
+                target_box_token = target_box_token.view(1, self.dim_model)
+                captioning_cue = text_tokens + target_box_token
+                assert captioning_cue.size() == (len_text_tokens, self.dim_model)
+                DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
+                assert DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
+                mask = self.get_seq2seq_mask(num_proposals, len_text_tokens)
+                output_DC_tokens = self.transformer_encoder(DC_tokens, mask.to("cuda"))
+                output_text_tokens = output_DC_tokens[num_proposals:]
+                assert output_text_tokens.size() == (len_text_tokens, self.dim_model)
+                DC_scores = self.caphead(output_text_tokens)
+                assert DC_scores.size() == (len_text_tokens, self.size_vocab)
+                # Compute DC loss
+                target_word_ids = data_dict["descr_token"][0]
+                target_word_ids = target_word_ids[1:] # Taken the last N-1 tokens as target
+                target_word_ids = nn.functional.one_hot(target_word_ids, self.size_vocab)
+                target_word_ids = torch.tensor(target_word_ids, dtype=torch.float32)
+                DC_loss += self.loss_criterion(DC_scores, target_word_ids)
+            DC_loss /= num_target_proposals
+
+        return {"VG_scores": VG_scores, "VG_loss": VG_loss, "DC_scores": DC_scores, "DC_loss": DC_loss}
     
     
     def init_weights(self):
@@ -158,17 +171,17 @@ class Transformer(nn.Module):
 
         mask_bottom_left = torch.full((size, num_proposals), float(0.0))
         mask_bottom_right = torch.triu(torch.ones(size, size)) # Upper triangular matrix
-        mask_bottom_right = mask_bottom_right.float().masked_fill(mask_bottom_right == 0, float(0.0)).masked_fill(mask_bottom_right == 1, float('-inf')).transpose(0, 1)
+        mask_bottom_right = mask_bottom_right.float().masked_fill(mask_bottom_right==0, float('-inf')).masked_fill(mask_bottom_right==1, float(0.0)).transpose(0, 1)
         mask_bottom = torch.cat((mask_bottom_left, mask_bottom_right), dim=1)
 
         mask = torch.cat((mask_upper, mask_bottom), dim=0)
         return mask
-        # -----box tokens---- ---text tokens---
-        # 0.0 0.0 0.0 0.0 0.0 -inf -inf -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0 -inf -inf -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0 -inf -inf -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0 -inf -inf -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0  0.0 -inf -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0  0.0  0.0 -inf -inf
-        # 0.0 0.0 0.0 0.0 0.0  0.0  0.0  0.0 -inf
-        # 0.0 0.0 0.0 0.0 0.0  0.0  0.0  0.0 -inf
+        #-box tokens- ------text tokens------
+        # 0.0 0.0 0.0 -inf -inf -inf -inf -inf
+        # 0.0 0.0 0.0 -inf -inf -inf -inf -inf
+        # 0.0 0.0 0.0 -inf -inf -inf -inf -inf
+        # 0.0 0.0 0.0  0.0 -inf -inf -inf -inf
+        # 0.0 0.0 0.0  0.0  0.0 -inf -inf -inf
+        # 0.0 0.0 0.0  0.0  0.0  0.0 -inf -inf
+        # 0.0 0.0 0.0  0.0  0.0  0.0  0.0 -inf
+        # 0.0 0.0 0.0  0.0  0.0  0.0  0.0  0.0
