@@ -23,7 +23,7 @@ class PositionalEncoding(nn.Module):
         pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
         
         # Saving buffer (same as parameter without gradients needed)
-        pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1)
+        # pos_encoding = pos_encoding.unsqueeze(0).transpose(0, 1) # For batched input
         self.register_buffer("pos_encoding", pos_encoding)
         
     def forward(self, token_embedding: torch.tensor) -> torch.tensor:
@@ -102,9 +102,8 @@ class Transformer(nn.Module):
         assert text_tokens.shape == (len_text_tokens, self.dim_wdfeats)
         text_tokens = self.word_to_model(text_tokens)
         assert text_tokens.shape == (len_text_tokens, self.dim_model)
-        # text_tokens = self.positional_encoder(text_tokens.unsqueeze(1))
-        # text_tokens = text_tokens[:,0]
-        # assert text_tokens.shape == (len_text_tokens, self.dim_model)
+        text_tokens = self.positional_encoder(text_tokens)
+        assert text_tokens.shape == (len_text_tokens, self.dim_model)
         # Prepared: (text_tokens)
     
         # Get target proposals:
