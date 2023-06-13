@@ -2,6 +2,7 @@ import numpy as np
 import torch.nn as nn
 import sys
 import time
+import psutil
 from minsu3d.evaluation.instance_segmentation import get_gt_instances, rle_encode
 from minsu3d.evaluation.object_detection import get_gt_bbox
 from minsu3d.common_ops.functions import softgroup_ops, common_ops
@@ -12,6 +13,7 @@ from transformers import BertConfig, BertModel
 from minsu3d.model.transformer import Transformer
 from minsu3d.model.softgroup import SoftGroup
 
+RAM_THRESHOLD = 2000 * 1024 * 1024 # leave at least 2GB of ram free
 
 class Joint_Arch(GeneralModel):
     def __init__(self, cfg):
@@ -51,10 +53,18 @@ class Joint_Arch(GeneralModel):
         #SoftGroup
         self.softgroup.eval()
         if scene in self.softgroup_past:
-            output_dict = self.softgroup_past[scene]
+            output_dict = self.softgroup_past[scene].copy()
+            output_dict["proposals_idx"] = output_dict["proposals_idx"].to("cuda")
+            output_dict["point_features"] = output_dict["point_features"].to("cuda")
+            output_dict["proposals_offset"] = output_dict["proposals_offset"].to("cuda")
         else:
             output_dict = self.softgroup(data_dict)
-            self.softgroup_past[scene] = output_dict
+            if psutil.virtual_memory().available > RAM_THRESHOLD:
+                out_cpy = {}
+                out_cpy["proposals_idx"] = output_dict["proposals_idx"].to("cpu")
+                out_cpy["point_features"] = output_dict["point_features"].to("cpu")
+                out_cpy["proposals_offset"] = output_dict["proposals_offset"].to("cpu")
+                self.softgroup_past[scene] = out_cpy
 
         # BERT
         with torch.no_grad():
@@ -119,45 +129,50 @@ class Joint_Arch(GeneralModel):
         # prepare input and forward
         output_dict = self(data_dict)
         losses = self._loss(data_dict, output_dict)
+        # output_dict = output_dict.copy()
+        # for k,v in output_dict.items():
+        #     if k in ["proposals_idx", "point_features"]:
+        #         output_dict[k] = v.to("cuda")
 
         # log losses
         total_loss = 0
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
             self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
-        self.log("val/total_loss", total_loss, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
+        self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
 
-        # log semantic prediction accuracy
-        semantic_predictions = output_dict["semantic_scores"].max(1)[1]
-        semantic_accuracy = evaluate_semantic_accuracy(semantic_predictions, data_dict["sem_labels"], ignore_label=-1)
-        semantic_mean_iou = evaluate_semantic_miou(semantic_predictions, data_dict["sem_labels"], ignore_label=-1)
-        self.log(
-            "val_eval/semantic_accuracy", semantic_accuracy, on_step=False, on_epoch=True, sync_dist=True, batch_size=1
-        )
-        self.log(
-            "val_eval/semantic_mean_iou", semantic_mean_iou, on_step=False, on_epoch=True, sync_dist=True, batch_size=1
-        )
 
-        if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
-            point_xyz_cpu = data_dict["point_xyz"].cpu().numpy()
-            instance_ids_cpu = data_dict["instance_ids"].cpu()
-            sem_labels = data_dict["sem_labels"].cpu()
+        # # log semantic prediction accuracy
+        # semantic_predictions = output_dict["semantic_scores"].max(1)[1]
+        # semantic_accuracy = evaluate_semantic_accuracy(semantic_predictions, data_dict["sem_labels"], ignore_label=-1)
+        # semantic_mean_iou = evaluate_semantic_miou(semantic_predictions, data_dict["sem_labels"], ignore_label=-1)
+        # self.log(
+        #     "val_eval/semantic_accuracy", semantic_accuracy, on_step=False, on_epoch=True, sync_dist=True, batch_size=1
+        # )
+        # self.log(
+        #     "val_eval/semantic_mean_iou", semantic_mean_iou, on_step=False, on_epoch=True, sync_dist=True, batch_size=1
+        # )
 
-            pred_instances = self._get_pred_instances(
-                data_dict["scan_ids"][0], point_xyz_cpu, output_dict["proposals_idx"].cpu(),
-                output_dict["semantic_scores"].size(0), output_dict["cls_scores"].cpu(),
-                output_dict["iou_scores"].cpu(), output_dict["mask_scores"].cpu(),
-                len(self.hparams.cfg.data.ignore_classes)
-            )
-            gt_instances = get_gt_instances(
-                sem_labels, instance_ids_cpu, self.hparams.cfg.data.ignore_classes
-            )
-            gt_instances_bbox = get_gt_bbox(
-                point_xyz_cpu, instance_ids_cpu.numpy(),
-                sem_labels.numpy(), -1, self.hparams.cfg.data.ignore_classes
-            )
+        # if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
+        #     point_xyz_cpu = data_dict["point_xyz"].cpu().numpy()
+        #     instance_ids_cpu = data_dict["instance_ids"].cpu()
+        #     sem_labels = data_dict["sem_labels"].cpu()
 
-            self.val_test_step_outputs.append((pred_instances, gt_instances, gt_instances_bbox))
+        #     pred_instances = self._get_pred_instances(
+        #         data_dict["scan_ids"][0], point_xyz_cpu, output_dict["proposals_idx"].cpu(),
+        #         output_dict["semantic_scores"].size(0), output_dict["cls_scores"].cpu(),
+        #         output_dict["iou_scores"].cpu(), output_dict["mask_scores"].cpu(),
+        #         len(self.hparams.cfg.data.ignore_classes)
+        #     )
+        #     gt_instances = get_gt_instances(
+        #         sem_labels, instance_ids_cpu, self.hparams.cfg.data.ignore_classes
+        #     )
+        #     gt_instances_bbox = get_gt_bbox(
+        #         point_xyz_cpu, instance_ids_cpu.numpy(),
+        #         sem_labels.numpy(), -1, self.hparams.cfg.data.ignore_classes
+        #     )
+
+        #     self.val_test_step_outputs.append((pred_instances, gt_instances, gt_instances_bbox))
 
     def test_step(self, data_dict, idx):
         # prepare input and forward

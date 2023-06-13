@@ -75,7 +75,7 @@ def read_seg_file(seg_file):
         seg2verts[seg].append(vert)
     return seg2verts, vert2seg
 
-def read_descr_file(desc_file, agg_file, scan):
+def read_descr_file(desc_file, agg_file, iou_0_set, scan):
     with open(desc_file, 'r') as json_data:
         data = json.load(json_data)
     inst_descr = []
@@ -92,6 +92,8 @@ def read_descr_file(desc_file, agg_file, scan):
                 if 'floor' in group['label'] or 'wall' in group['label']:
                     ignored_obj += 1
             instance["object_id"] = [int(obj_id) - ignored_obj]
+            if scan + str(instance["object_id"][0]) in iou_0_set:
+                continue
         for ann_id in scan_data[obj_id]:
             instance_cpy = instance.copy()
             instance_cpy["ann_id"] = ann_id
@@ -129,7 +131,7 @@ def get_instance_ids(object_id2segs, seg2verts, sem_labels, invalid_ids):
     return instance_ids
 
 
-def process_one_scan(scan, cfg, split, label_map):
+def process_one_scan(scan, cfg, split, label_map, iou_0_set):
     mesh_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '_vh_clean_2.ply')
     agg_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '.aggregation.json')
     seg_file_path = os.path.join(cfg.data.raw_scene_path, scan, scan + '_vh_clean_2.0.010000.segs.json')
@@ -145,7 +147,7 @@ def process_one_scan(scan, cfg, split, label_map):
         # read agg_file
         object_id2segs, label2segs = read_agg_file(agg_file_path)
 
-        object_descr = read_descr_file(descr_file_path, agg_file_path, scan)
+        object_descr = read_descr_file(descr_file_path, agg_file_path, iou_0_set, scan)
 
         # get semantic labels
         # create a map, skip invalid labels to make the final semantic labels consecutive
@@ -173,12 +175,15 @@ def process_one_scan(scan, cfg, split, label_map):
 def main(cfg):
     label_map = get_semantic_mapping_file(cfg.data.metadata.combine_file)
     print("\nDefault: using all CPU cores.")
+    iou_0_file_path = cfg.data.metadata.iou_list
+    with open(iou_0_file_path) as file:
+            iou_0_set = set([line.rstrip() for line in file])
     for split in ("train", "val", "test"):
         os.makedirs(os.path.join(cfg.data.dataset_path, split), exist_ok=True)
         with open(getattr(cfg.data.metadata, f"{split}_list")) as f:
             id_list = [line.strip() for line in f]
         print(f"==> Processing {split} split ...")
-        process_map(partial(process_one_scan, cfg=cfg, split=split, label_map=label_map), id_list, chunksize=1)
+        process_map(partial(process_one_scan, cfg=cfg, split=split, label_map=label_map, iou_0_set=iou_0_set), id_list, chunksize=1)
 
 
 if __name__ == '__main__':
