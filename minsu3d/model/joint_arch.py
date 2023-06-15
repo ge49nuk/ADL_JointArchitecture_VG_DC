@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 from minsu3d.evaluation.instance_segmentation import get_gt_instances, rle_encode
 from minsu3d.evaluation.object_detection import get_gt_bbox
 from minsu3d.util.lr_decay import cosine_lr_decay
+from minsu3d.util.io import save_prediction_joint_arch
 from minsu3d.common_ops.functions import softgroup_ops, common_ops
 
 from transformers import BertConfig, BertModel
@@ -29,7 +30,7 @@ class Joint_Arch(pl.LightningModule):
         self.bert = BertModel(configuration).to("cuda")
         self.softgroup = SoftGroup(cfg=cfg)
         self.softgroup_past = {}
-        checkpoint = torch.load(cfg.model.ckpt_path)
+        checkpoint = torch.load(cfg.model.ckpt_path_SG)
         self.softgroup.load_state_dict(checkpoint['state_dict'])
         for param in self.softgroup.parameters():
             param.requires_grad = False
@@ -57,9 +58,13 @@ class Joint_Arch(pl.LightningModule):
             output_dict = self.softgroup(data_dict)
             if psutil.virtual_memory().available > RAM_THRESHOLD:
                 out_cpy = {}
-                out_cpy["proposals_idx"] = output_dict["proposals_idx"].to("cpu")
-                out_cpy["point_features"] = output_dict["point_features"].to("cpu")
-                out_cpy["proposals_offset"] = output_dict["proposals_offset"].to("cpu")
+                if(self.hparams.cfg.model.quick_training):
+                    out_cpy["proposals_idx"] = output_dict["proposals_idx"].to("cpu")
+                    out_cpy["point_features"] = output_dict["point_features"].to("cpu")
+                    out_cpy["proposals_offset"] = output_dict["proposals_offset"].to("cpu")
+                else:
+                    for k,v in output_dict.items():
+                        out_cpy[k] = v.to("cpu")
                 self.softgroup_past[scene] = out_cpy
 
         # BERT
@@ -222,90 +227,55 @@ class Joint_Arch(pl.LightningModule):
         #     self.log("val_eval/BBox AP 50%", obj_detect_eval_result["all_bbox_ap_0.5"]["avg"], sync_dist=True)
 
     def test_step(self, data_dict, idx):
-        pass
         # prepare input and forward
-        # output_dict = self(data_dict)
-        # semantic_accuracy = None
-        # semantic_mean_iou = None
-        # if self.hparams.cfg.model.inference.evaluate:
-        #     semantic_predictions = output_dict["semantic_scores"].max(1)[1]
-        #     semantic_accuracy = evaluate_semantic_accuracy(
-        #         semantic_predictions, data_dict["sem_labels"], ignore_label=-1
-        #     )
-        #     semantic_mean_iou = evaluate_semantic_miou(
-        #         semantic_predictions, data_dict["sem_labels"], ignore_label=-1
-        #     )
+        output_dict = self(data_dict)
+            
+        #prepare data for visualization
+        queried_obj = data_dict["queried_objs"][0]
+        predicted_proposal_ids = []
+        vg_scores_cpy = output_dict["VG_scores"]
+        for _ in queried_obj:
+            predicted_proposal_ids.append(torch.argmax(vg_scores_cpy))
+            vg_scores_cpy[torch.argmax(vg_scores_cpy)] = -9999
+            
+        predicted_proposal_ids = [id.item() for id in predicted_proposal_ids]
+        predicted_verts = output_dict["proposals_idx"].cpu()
+        predicted_verts_arr = []
+        for id in predicted_proposal_ids:
+            predicted_verts_arr.append(np.array(predicted_verts[predicted_verts[:,0] == id][:,1]).tolist())
 
-        # if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
-        #     point_xyz_cpu = data_dict["point_xyz"].cpu().numpy()
-        #     instance_ids_cpu = data_dict["instance_ids"].cpu()
-        #     sem_labels = data_dict["sem_labels"].cpu()
+        GT_verts_arr = []
+        for o in queried_obj:
+            b = data_dict["instance_ids"] == o
+            GT_verts = b.nonzero()
+            GT_verts_arr.append([tensor.item() for tensor in GT_verts])
+        
+        scan_desc_id = data_dict["scan_ids"][0]+":"+str(data_dict["descr_ids"][0])
 
-        #     pred_instances = self._get_pred_instances(
-        #         data_dict["scan_ids"][0], point_xyz_cpu, output_dict["proposals_idx"].cpu(),
-        #         output_dict["semantic_scores"].size(0), output_dict["cls_scores"].cpu(), output_dict["iou_scores"].cpu(),
-        #         output_dict["mask_scores"].cpu(), len(self.hparams.cfg.data.ignore_classes)
-        #     )
-        #     gt_instances = None
-        #     gt_instances_bbox = None
-        #     if self.hparams.cfg.model.inference.evaluate:
-        #         gt_instances = get_gt_instances(
-        #             sem_labels, instance_ids_cpu, self.hparams.cfg.data.ignore_classes
-        #         )
-
-        #         gt_instances_bbox = get_gt_bbox(
-        #             point_xyz_cpu, instance_ids_cpu.numpy(),
-        #             sem_labels.numpy(), -1, self.hparams.cfg.data.ignore_classes
-        #         )
-
-        #     self.val_test_step_outputs.append(
-        #         (semantic_accuracy, semantic_mean_iou, pred_instances, gt_instances, gt_instances_bbox)
-        #     )
+        self.val_test_step_outputs.append(
+            (predicted_verts_arr, GT_verts_arr, scan_desc_id)
+        )
 
     def on_test_epoch_end(self):
-        pass
-        # evaluate instance predictions
-        # if self.current_epoch > self.hparams.cfg.model.network.prepare_epochs:
-        #     all_pred_insts = []
-        #     all_gt_insts = []
-        #     all_gt_insts_bbox = []
-        #     all_sem_acc = []
-        #     all_sem_miou = []
-        #     for semantic_accuracy, semantic_mean_iou, pred_instances, gt_instances, gt_instances_bbox in self.val_test_step_outputs:
-        #         all_sem_acc.append(semantic_accuracy)
-        #         all_sem_miou.append(semantic_mean_iou)
-        #         all_gt_insts_bbox.append(gt_instances_bbox)
-        #         all_gt_insts.append(gt_instances)
-        #         all_pred_insts.append(pred_instances)
+        all_pred_verts = []
+        all_gt_verts = []
+        all_scan_desc_ids = []
+        for predicted_verts, gt_verts, scan_desc_id in self.val_test_step_outputs:
+            all_pred_verts.append(predicted_verts)
+            all_gt_verts.append(gt_verts)
+            all_scan_desc_ids.append(scan_desc_id)
 
-        #     self.val_test_step_outputs.clear()
+        self.val_test_step_outputs.clear()
+        if self.hparams.cfg.model.inference.save_predictions:
+            save_dir = os.path.join(
+                self.hparams.cfg.exp_output_root_path, 'inference', self.hparams.cfg.model.inference.split,
+                'predictions'
+            )
+            save_prediction_joint_arch(
+                save_dir, all_pred_verts, all_gt_verts, all_scan_desc_ids
+            )
+            self.print(f"\nPredictions saved at {os.path.abspath(save_dir)}")
 
-        #     if self.hparams.cfg.model.inference.evaluate:
-        #         inst_seg_evaluator = GeneralDatasetEvaluator(
-        #             self.hparams.cfg.data.class_names, -1, self.hparams.cfg.data.ignore_classes
-        #         )
-        #         self.print("Evaluating instance segmentation ...")
-        #         inst_seg_eval_result = inst_seg_evaluator.evaluate(all_pred_insts, all_gt_insts, print_result=True)
-        #         obj_detect_eval_result = evaluate_bbox_acc(
-        #             all_pred_insts, all_gt_insts_bbox,
-        #             self.hparams.cfg.data.class_names, self.hparams.cfg.data.ignore_classes, print_result=True
-        #         )
-
-        #         sem_miou_avg = np.mean(np.array(all_sem_miou))
-        #         sem_acc_avg = np.mean(np.array(all_sem_acc))
-        #         self.print(f"Semantic Accuracy: {sem_acc_avg}")
-        #         self.print(f"Semantic mean IoU: {sem_miou_avg}")
-
-        #     if self.hparams.cfg.model.inference.save_predictions:
-        #         save_dir = os.path.join(
-        #             self.hparams.cfg.exp_output_root_path, 'inference', self.hparams.cfg.model.inference.split,
-        #             'predictions'
-        #         )
-        #         save_prediction(
-        #             save_dir, all_pred_insts, self.hparams.cfg.data.mapping_classes_ids,
-        #             self.hparams.cfg.data.ignore_classes
-        #         )
-        #         self.print(f"\nPredictions saved at {os.path.abspath(save_dir)}")
 
 
     # def _get_pred_instances(self, scan_id, gt_xyz, proposals_idx, num_points, cls_scores, iou_scores, mask_scores,

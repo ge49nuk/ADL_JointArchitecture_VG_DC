@@ -31,6 +31,7 @@ def main(cfg):
     print("=> start inference...")
     
     checkpoint = torch.load(cfg.model.ckpt_path)
+    cfg.model.quick_training = False
     trainer.fit_loop.epoch_progress.current.completed = checkpoint["epoch"]  # TODO
     trainer.test(model=model, datamodule=data_module)
 

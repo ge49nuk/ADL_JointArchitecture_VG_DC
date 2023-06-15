@@ -10,8 +10,6 @@ from pathlib import Path
 import numpy as np
 import open3d as o3d
 from tqdm import tqdm
-from minsu3d.util.pc import write_ply_rgb_face
-from minsu3d.util.bbox import write_cylinder_bbox
 
 
 SCANNET_COLOR_MAP = {
@@ -57,6 +55,33 @@ SCANNET_COLOR_MAP = {
     40: (100.0, 85.0, 144.0),
 }
 
+def write_ply(verts, colors, indices, output_file):
+    if colors is None:
+        colors = np.zeros_like(verts)
+    if indices is None:
+        indices = []
+
+    file = open(output_file, 'w')
+    file.write('ply \n')
+    file.write('format ascii 1.0\n')
+    file.write('element vertex {:d}\n'.format(len(verts)))
+    file.write('property float x\n')
+    file.write('property float y\n')
+    file.write('property float z\n')
+    file.write('property uchar red\n')
+    file.write('property uchar green\n')
+    file.write('property uchar blue\n')
+    file.write('element face {:d}\n'.format(len(indices)))
+    file.write('property list uchar uint vertex_indices\n')
+    file.write('end_header\n')
+    for vert, color in zip(verts, colors):
+        file.write('{:f} {:f} {:f} {:d} {:d} {:d}\n'.format(vert[0], vert[1], vert[2],
+                                                            int(color[0] * 255),
+                                                            int(color[1] * 255),
+                                                            int(color[2] * 255)))
+    for ind in indices:
+        file.write('3 {:d} {:d} {:d}\n'.format(ind[0], ind[1], ind[2]))
+    file.close()
 
 def get_bbox(predicted_mask, points):
     x_min = None
@@ -94,65 +119,63 @@ def get_random_rgb_colors(num):
     return rgb_colors
 
 
-def generate_colored_ply(args, predicted_mask_list, labelIndexes, points, colors, indices,
-                         rgb_inst_ply):
-    if args.mode == "semantic":
-        for index, predicted_mask in enumerate(predicted_mask_list):
-            semanticIndex = labelIndexes[index]
-            # confidence = confidenceScores[index]
-            for vertexIndex, color in enumerate(colors):
-                if predicted_mask[vertexIndex] == True:
-                    colors[vertexIndex] = SCANNET_COLOR_MAP[int(semanticIndex)]
-    elif args.mode == "instance":
-        color_list = get_random_rgb_colors(len(labelIndexes))
-        random.shuffle(color_list)
-        for index, predicted_mask in enumerate(predicted_mask_list):
-            for vertexIndex, color in enumerate(colors):
-                if predicted_mask[vertexIndex] == True:
-                    colors[vertexIndex] = color_list[index]
-    write_ply_rgb_face(points, colors, indices, rgb_inst_ply)
+def generate_colored_ply(args, points, colors, indices,
+                         rgb_inst_ply, pred_verts, gt_verts):
+    if args.mode == "instance":
+        unique_gt_verts = np.unique(np.array(gt_verts).flatten())
+        for i, query in enumerate(gt_verts):
+            for vertexIndex in gt_verts[i]:
+                colors[vertexIndex] = [255,255,1] # GT
+        for i, query in enumerate(pred_verts):
+            for vertexIndex in pred_verts[i]:
+                if vertexIndex in unique_gt_verts:
+                    colors[vertexIndex] = [255,1,255] # GT interesects with pred
+                else:
+                    colors[vertexIndex] = [1,255,255] # pred
+
+    write_ply(points, colors, indices, rgb_inst_ply)
     return 0
 
 
-def generate_bbox_ply(args, predicted_mask_list, labelIndexes, points, colors, indices, rgb_inst_ply):
-    b_verts = []
-    b_colors = []
-    b_indices = []
-    for index, predicted_mask in enumerate(predicted_mask_list):
-        x_min, x_max, y_min, y_max, z_min, z_max = get_bbox(predicted_mask, points)
-        currbbox = [(x_min + x_max) / 2.0, (y_min + y_max) / 2.0, (z_min + z_max) / 2.0, x_max - x_min, y_max - y_min,
-                    z_max - z_min]
+# def generate_bbox_ply(args, predicted_mask_list, labelIndexes, points, colors, indices, rgb_inst_ply):
+#     b_verts = []
+#     b_colors = []
+#     b_indices = []
+#     for index, predicted_mask in enumerate(predicted_mask_list):
+#         x_min, x_max, y_min, y_max, z_min, z_max = get_bbox(predicted_mask, points)
+#         currbbox = [(x_min + x_max) / 2.0, (y_min + y_max) / 2.0, (z_min + z_max) / 2.0, x_max - x_min, y_max - y_min,
+#                     z_max - z_min]
 
-        if args.mode == 'semantic':
-            semanticIndex = labelIndexes[index]
-            chooseColor = SCANNET_COLOR_MAP[int(semanticIndex)]
-        else:
-            color_list = get_random_rgb_colors(len(labelIndexes))
-            random.shuffle(color_list)
-            chooseColor = color_list[index]
-        curr_verts, curr_colors, curr_indices = write_cylinder_bbox(np.array(currbbox), 0, None, color=chooseColor)
-        curr_indices = np.array(curr_indices)
-        curr_indices = curr_indices + len(b_verts)
-        curr_indices = curr_indices.tolist()
-        b_verts.extend(curr_verts)
-        b_colors.extend(curr_colors)
-        b_indices.extend(curr_indices)
+#         if args.mode == 'semantic':
+#             semanticIndex = labelIndexes[index]
+#             chooseColor = SCANNET_COLOR_MAP[int(semanticIndex)]
+#         else:
+#             color_list = get_random_rgb_colors(len(labelIndexes))
+#             random.shuffle(color_list)
+#             chooseColor = color_list[index]
+#         curr_verts, curr_colors, curr_indices = write_cylinder_bbox(np.array(currbbox), 0, None, color=chooseColor)
+#         curr_indices = np.array(curr_indices)
+#         curr_indices = curr_indices + len(b_verts)
+#         curr_indices = curr_indices.tolist()
+#         b_verts.extend(curr_verts)
+#         b_colors.extend(curr_colors)
+#         b_indices.extend(curr_indices)
 
-    points = points.tolist()
-    colors = colors.tolist()
-    indices = indices.tolist()
-    b_indices = np.array(b_indices)
-    b_indices = b_indices + len(points)
-    b_indices = b_indices.tolist()
-    points.extend(b_verts)
-    colors.extend(b_colors)
-    indices.extend(b_indices)
+#     points = points.tolist()
+#     colors = colors.tolist()
+#     indices = indices.tolist()
+#     b_indices = np.array(b_indices)
+#     b_indices = b_indices + len(points)
+#     b_indices = b_indices.tolist()
+#     points.extend(b_verts)
+#     colors.extend(b_colors)
+#     indices.extend(b_indices)
 
-    points = np.array(points)
-    colors = np.array(colors)
-    indices = np.array(indices)
-    write_ply_rgb_face(points, colors, indices, rgb_inst_ply)
-    return 0
+#     points = np.array(points)
+#     colors = np.array(colors)
+#     indices = np.array(indices)
+#     write_ply_rgb_face(points, colors, indices, rgb_inst_ply)
+#     return 0
 
 
 def generate_single_ply(args):
@@ -160,11 +183,10 @@ def generate_single_ply(args):
 
     # define position of necessary files
     ply_file = os.path.join(args.scans, args.scene_id, f'{args.scene_id}_vh_clean_2.ply')
-    # alignment_file = os.path.join(args.scans, args.scene_id, f'{args.scene_id}.txt')
-    pred_sem_file = os.path.join(args.predict_dir, f'{args.scene_id}.txt')
+    inst_info_file = os.path.join(args.predict_dir, f'{args.full_id}.txt')
 
     # define where to output the ply file
-    rgb_inst_ply = os.path.join(args.output_dir, f'{args.scene_id}.ply')
+    rgb_inst_ply = os.path.join(args.output_dir, f'{args.full_id}.ply')
 
     # get mesh
     scannet_data = o3d.io.read_triangle_mesh(ply_file)
@@ -174,39 +196,35 @@ def generate_single_ply(args):
     indices = np.asarray(scannet_data.triangles)
     colors = colors * 255.0
 
-    with open(pred_sem_file) as file:
-        lines = file.readlines()
-        lines = [line.rstrip() for line in lines]
-
-    instanceFileNames = []
-    labelIndexes = []
-    confidenceScores = []
-    predicted_mask_list = []
-    for i in lines:
-        splitedLine = i.split()
-        instanceFileNames.append(os.path.join(args.predict_dir, splitedLine[0]))
-        labelIndexes.append(splitedLine[1])
-        confidenceScores.append(splitedLine[2])
-
-    for instanceFileName in instanceFileNames:
-        predicted_mask_list.append(np.loadtxt(instanceFileName, dtype=bool))
+    
+    with open(inst_info_file) as file:
+        data = file.readlines()
+        data = [line.rstrip() for line in data]
+    num_queried_obj = int(len(data)/2)
+    pred_verts = []
+    gt_verts = []
+    for i in range(num_queried_obj):
+        verts = data[i].split()
+        pred_verts.append([int(val) for val in verts])
+        verts = data[i+num_queried_obj].split()
+        gt_verts.append([int(val) for val in verts])
 
     if not args.bbox:
-        generate_colored_ply(args, predicted_mask_list, labelIndexes, points, colors, indices,
-                             rgb_inst_ply)
-    else:
-        generate_bbox_ply(args, predicted_mask_list, labelIndexes, points, colors, indices,
-                          rgb_inst_ply)
+        generate_colored_ply(args, points, colors, indices,
+                             rgb_inst_ply, pred_verts, gt_verts)
 
 
 def generate_pred_inst_ply(args):
-    metadata_path = os.path.join(Path(os.getcwd()).parent.parent.absolute(), 'data/scannet/metadata')
-    scene_ids_file = os.path.join(metadata_path, f'scannetv2_{args.split}.txt')
-    args.scans = os.path.join(Path(os.getcwd()).parent.parent.absolute(), 'data/scannet/scans')
+    metadata_path = os.path.join(Path(os.getcwd()).parent.parent.absolute(), 'data/scannetv2/metadata')
+    ids_file = os.path.join(args.predict_dir, "scenes.txt")
+    args.scans = os.path.join(Path(os.getcwd()).parent.parent.absolute(), 'data/scannetv2/scans')
 
-    scene_ids = [scene_id.rstrip() for scene_id in open(scene_ids_file)]
-    for scene_id in tqdm(scene_ids):
+    full_ids = [full_id.rstrip() for full_id in open(ids_file)]
+    for id in tqdm(full_ids):
+        scene_id, _ = id.split(":")
         args.scene_id = scene_id
+        args.full_id = id
+        
         generate_single_ply(args)
 
 

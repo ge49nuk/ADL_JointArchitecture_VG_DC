@@ -8,6 +8,7 @@ from minsu3d.evaluation.instance_segmentation import rle_decode, rle_encode
 
 def save_prediction(save_path, all_pred_insts, mapping_ids, ignored_classes_indices):
     inst_pred_path = os.path.join(save_path, "instance")
+    # SOFTGROUP
     inst_pred_masks_path = os.path.join(inst_pred_path, "predicted_masks")
     os.makedirs(inst_pred_masks_path, exist_ok=True)
     scan_instance_count = {}
@@ -32,6 +33,32 @@ def save_prediction(save_path, all_pred_insts, mapping_ids, ignored_classes_indi
             scan_instance_count[scan_id] += 1
         with open(os.path.join(inst_pred_path, f"{scan_id}.txt"), "w") as f:
             f.write("\n".join(tmp_info))
+    
+
+def save_prediction_joint_arch(save_path, predicted_verts, gt_verts, scan_desc_ids):
+    inst_pred_path = os.path.join(save_path, "instance")
+    # JOINT_ARCH
+    scenes_str = ""
+    for i in range(len(scan_desc_ids)): # batch
+        id = scan_desc_ids[i]
+        pred_verts_txt = ""
+        gt_verts_txt = ""
+        for j in range(len(predicted_verts[i])): # number of queried objects
+            for vert in predicted_verts[i][j]: # number of verts
+                pred_verts_txt += str(vert)+" "
+        for j in range(len(gt_verts[i])):
+            for vert in gt_verts[i][j]:
+                gt_verts_txt += str(vert)+" "
+
+        with open(os.path.join(inst_pred_path, f"{id}.txt"), "w") as f:
+                f.write(pred_verts_txt +"\n"+ gt_verts_txt)
+
+        scenes_str += id + "\n"
+
+    with open(os.path.join(inst_pred_path, "scenes.txt"), "w") as f:
+                f.write(scenes_str)
+
+
 
 
 def read_gt_files_from_disk(data_path):
