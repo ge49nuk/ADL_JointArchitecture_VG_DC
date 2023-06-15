@@ -167,7 +167,7 @@ def process_one_scan(scan, cfg, split, label_map, iou_0_set):
     torch.save({'num_descr':len(object_descr), 'xyz': xyz, 'rgb': rgb, 'normal': normal, 'sem_labels': sem_labels, 'instance_ids': instance_ids},#'vert2seg':vert2seg},
                os.path.join(cfg.data.dataset_path, split, f"{scan}.pth"))
     for i, desc in enumerate(object_descr):
-        torch.save({'object_descr' : desc, 'descr_id' : i},},
+        torch.save({'object_descr' : desc},},
                os.path.join(cfg.data.dataset_path, split, f"{scan}_{i}.pth"))
 
 
