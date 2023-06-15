@@ -28,11 +28,12 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(scene_info['num_descr']):
+            for i in range(5):
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
                 scene["object_descr"] = scene_descr["object_descr"]
+                scene["descr_id"] = i
                 self.scenes.append(scene)
 
     def __len__(self):
@@ -90,6 +91,7 @@ class GeneralDataset(Dataset):
     def __getitem__(self, idx):
         scene = self.scenes[idx]
         scene_id =scene["scene_id"]
+        descr_id = scene["descr_id"]
 
         point_xyz = scene["xyz"].astype(np.float32)  # (N, 3)
         colors = scene["rgb"].astype(np.float32)  # (N, 3)
@@ -98,7 +100,8 @@ class GeneralDataset(Dataset):
         instance_ids = scene["instance_ids"].astype(np.int16)  # (N, )
         sem_labels = scene["sem_labels"].astype(np.int16)  # (N, )
         descr_dict = scene["object_descr"]
-        descr_token = descr_dict["token"]   
+        descr_tokens = descr_dict["tokens"]   
+        num_descr_tokens = descr_dict["num_tokens"] 
         queried_obj = descr_dict["object_id"]
         
 
@@ -182,7 +185,9 @@ class GeneralDataset(Dataset):
         data["instance_center_xyz"] = instance_center_xyz
         data["instance_num_point"] = np.array(instance_num_point, dtype=np.int32)
         data["instance_semantic_cls"] = instance_semantic_cls
-        data["descr_token"] = descr_token
+        data["descr_tokens"] = descr_tokens
+        data["num_descr_tokens"] = num_descr_tokens
+        data["descr_id"] = descr_id
         data["queried_obj"] = queried_obj
 
         data["voxel_xyz"], data["voxel_features"], _, data["voxel_point_map"] = ME.utils.sparse_quantize(

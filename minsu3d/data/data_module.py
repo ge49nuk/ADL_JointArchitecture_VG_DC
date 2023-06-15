@@ -56,8 +56,10 @@ def _sparse_collate_fn(batch):
     voxel_point_map_list = []
     num_voxel_batch = 0
     scan_ids = []
-    descr_token = []
-    queried_obj = []
+    descr_tokens = []
+    num_descr_tokens = []
+    descr_ids = []
+    queried_objs = []
 
     for i, b in enumerate(batch):
         scan_ids.append(b["scan_id"])
@@ -83,9 +85,11 @@ def _sparse_collate_fn(batch):
 
         instance_cls.extend(b["instance_semantic_cls"])
 
-        descr_token.append(torch.tensor(b["descr_token"]))
+        descr_tokens.append(torch.tensor(b["descr_tokens"]))
+        num_descr_tokens.append(b["num_descr_tokens"])
+        descr_ids.append(b["descr_id"])
 
-        queried_obj.append(b["queried_obj"])
+        queried_objs.append(b["queried_obj"])
 
     data['scan_ids'] = scan_ids
     data["point_xyz"] = torch.cat(point_xyz, dim=0)
@@ -97,8 +101,10 @@ def _sparse_collate_fn(batch):
     data["instance_num_point"] = torch.cat(instance_num_point, dim=0)
     data["instance_offsets"] = torch.tensor(instance_offsets, dtype=torch.int32)
     data["instance_semantic_cls"] = torch.tensor(instance_cls, dtype=torch.int16)
-    data["descr_token"] = torch.stack(descr_token)
-    data["queried_obj"] = queried_obj
+    data["descr_tokens"] = torch.stack(descr_tokens)
+    data["num_descr_tokens"] = num_descr_tokens
+    data["descr_ids"] = descr_ids
+    data["queried_objs"] = queried_objs
     data["num_instance"] = total_num_inst
 
     data["voxel_xyz"], data["voxel_features"] = ME.utils.sparse_collate(

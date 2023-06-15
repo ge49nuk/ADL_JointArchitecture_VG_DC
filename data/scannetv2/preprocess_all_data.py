@@ -102,11 +102,11 @@ def read_descr_file(desc_file, agg_file, iou_0_set, scan):
             if descr in seen_desc:
                 inst_descr[seen_desc[descr]]["object_id"].append(instance["object_id"][0])
                 continue
-            #tokenized_descr = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
+            tokenized_descr = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
             tokens = np.array(tokenizer.tokenize(descr))
-            #np.put(tokenized_descr, range(len(tokens)), tokens)
-            #instance_cpy["token"] = np.array(tokenizer.convert_tokens_to_ids(tokenized_descr))
-            instance_cpy["token"] = np.array(tokenizer.convert_tokens_to_ids(tokens))
+            np.put(tokenized_descr, range(len(tokens)), tokens)
+            instance_cpy["tokens"] = np.array(tokenizer.convert_tokens_to_ids(tokenized_descr))
+            instance_cpy["num_tokens"] = len(tokens)
             seen_desc[descr] = len(inst_descr)
             inst_descr.append(instance_cpy)
     

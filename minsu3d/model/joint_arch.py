@@ -65,11 +65,11 @@ class Joint_Arch(pl.LightningModule):
         # BERT
         with torch.no_grad():
             self.bert.eval()
-            bert_out = self.bert(data_dict["descr_token"]) 
+            bert_out = self.bert(data_dict["descr_tokens"]) 
         output_dict["descr_embedding"] = bert_out[0]                # Shape: [tensor(batch_size, seq_len, emb_dim)]
 
         # COMPUTE MOST ACCURATE OBJECT PROPOSAL
-        queried_obj = data_dict["queried_obj"][0]
+        queried_obj = data_dict["queried_objs"][0]
         proposals_idx = output_dict["proposals_idx"][:, 1].int().contiguous()
         proposals_offset = output_dict["proposals_offset"]
         # calculate iou of clustered instance
@@ -81,7 +81,7 @@ class Joint_Arch(pl.LightningModule):
         for o in queried_obj:
             ious_queried_obj = ious_on_cluster[:,o]
             best_proposals.append(torch.argmax(ious_queried_obj))
-        output_dict["target_proposal"] = best_proposals
+        output_dict["target_proposals"] = best_proposals
 
         # Transformer
         transformer_out = self.transformer(data_dict, output_dict)

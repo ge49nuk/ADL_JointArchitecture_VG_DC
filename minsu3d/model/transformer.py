@@ -97,7 +97,8 @@ class Transformer(nn.Module):
         
         # Get text tokens:
         text_tokens = output_dict["descr_embedding"][0]  # word embeddings from BERT (start/end with [CLS]/[SEP], variable length)
-        text_tokens = text_tokens[:-1] # Taken the first N-1 tokens as input, which means ignoring [SEP]
+        num_tokens = data_dict["num_descr_tokens"][0]
+        text_tokens = text_tokens[:(num_tokens-1)] # Taken the first N-1 tokens as input, which means ignoring [SEP]
         len_text_tokens = text_tokens.shape[0]
         assert text_tokens.shape == (len_text_tokens, self.dim_wdfeats)
         text_tokens = self.word_to_model(text_tokens)
@@ -107,7 +108,7 @@ class Transformer(nn.Module):
         # Prepared: (text_tokens)
     
         # Get target proposals:
-        target_proposals = output_dict["target_proposal"]
+        target_proposals = output_dict["target_proposals"]
         num_target_proposals = len(target_proposals)
         # Prepared: (target_proposals, num_target_proposals)
 
@@ -144,8 +145,8 @@ class Transformer(nn.Module):
                 DC_scores = self.caphead(output_text_tokens)
                 assert DC_scores.size() == (len_text_tokens, self.size_vocab)
                 # Compute DC loss
-                target_word_ids = data_dict["descr_token"][0]
-                target_word_ids = target_word_ids[1:] # Taken the last N-1 tokens as target
+                target_word_ids = data_dict["descr_tokens"][0]
+                target_word_ids = target_word_ids[1:num_tokens] # Taken the last N-1 tokens as target
                 target_word_ids = nn.functional.one_hot(target_word_ids, self.size_vocab)
                 target_word_ids = torch.tensor(target_word_ids, dtype=torch.float32)
                 DC_loss += self.loss_criterion(DC_scores, target_word_ids)
