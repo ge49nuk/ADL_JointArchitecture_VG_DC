@@ -35,7 +35,7 @@ class PositionalEncoding(nn.Module):
 
     
 class Transformer(nn.Module):
-    def __init__(self, max_text_len=134, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
+    def __init__(self, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
         super().__init__()
 
         self.model_type = "Transformer"
@@ -43,6 +43,7 @@ class Transformer(nn.Module):
         self.dim_ptfeats = dim_ptfeats
         self.dim_wdfeats = dim_wdfeats
         self.size_vocab = size_vocab
+        self.num_cls = num_cls
         
         # Layers
         # Transform point and word to have dimension=dim_model
@@ -70,6 +71,13 @@ class Transformer(nn.Module):
             nn.Linear(640, self.dim_ptfeats),
             nn.Linear(self.dim_ptfeats, self.size_vocab)
         )
+        # Decoder layer: (#Classes) scores for each [CLS] token
+        self.clshead = nn.Sequential(
+            nn.Linear(self.dim_model, 512),
+            nn.Linear(512, 256),
+            nn.Linear(256, self.num_cls)
+        )
+
         # Define loss criterion
         self.loss_criterion = nn.CrossEntropyLoss()
 
@@ -112,6 +120,7 @@ class Transformer(nn.Module):
         num_target_proposals = len(target_proposals)
         # Prepared: (target_proposals, num_target_proposals)
 
+
         # Visual grounding pass
         global_box_token = box_tokens.mean(dim=0, keepdim=True)
         global_visual_cue = text_tokens + global_box_token
@@ -120,14 +129,20 @@ class Transformer(nn.Module):
         output_VG_tokens = self.transformer_encoder(VG_tokens)
         output_box_tokens = output_VG_tokens[:num_proposals]
         assert output_box_tokens.size() == (num_proposals, self.dim_model)
-        VG_scores = (self.grdhead(output_box_tokens)).flatten()
-        assert VG_scores.size() == (num_proposals,)
-        # Compute VG loss
-        VG_target = torch.zeros((VG_scores.shape))
+        Match_scores = (self.grdhead(output_box_tokens)).flatten()
+        assert Match_scores.size() == (num_proposals,)
+        # Compute Matching loss
+        Match_targets = torch.zeros((Match_scores.shape))
         for p in target_proposals:
-            VG_target[p] = 1.0 / num_target_proposals
-        VG_loss = self.loss_criterion(VG_scores, VG_target.to("cuda"))
+            Match_targets[p] = 1.0 / num_target_proposals
+        Match_loss = self.loss_criterion(Match_scores, Match_targets.to("cuda"))
+        # Compute CLS loss
+        encoded_cls_token = output_VG_tokens[num_proposals]
+        CLS_scores = self.clshead(encoded_cls_token)
+        CLS_target = data_dict["target_class"] # One-hot vector
+        CLS_loss = self.loss_criterion(CLS_scores, CLS_target.to("cuda"))
         
+
         # Dense captioning pass
         DC_loss = 0.0
         if num_target_proposals > 0:
@@ -152,7 +167,9 @@ class Transformer(nn.Module):
                 DC_loss += self.loss_criterion(DC_scores, target_word_ids)
             DC_loss /= num_target_proposals
 
-        return {"VG_scores": VG_scores, "VG_loss": VG_loss, "DC_scores": DC_scores, "DC_loss": DC_loss}
+        return {"Match_scores": Match_scores, "Match_loss": Match_loss,
+                "CLS_scores": CLS_scores, "CLS_loss": CLS_loss,
+                "DC_scores": DC_scores, "DC_loss": DC_loss}
     
     
     def init_weights(self):

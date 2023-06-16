@@ -58,6 +58,7 @@ def _sparse_collate_fn(batch):
     scan_ids = []
     descr_tokens = []
     num_descr_tokens = []
+    object_names = []
     descr_ids = []
     queried_objs = []
 
@@ -87,6 +88,7 @@ def _sparse_collate_fn(batch):
 
         descr_tokens.append(torch.tensor(b["descr_tokens"]))
         num_descr_tokens.append(b["num_descr_tokens"])
+        object_names.append(b["object_name"])
         descr_ids.append(b["descr_id"])
 
         queried_objs.append(b["queried_obj"])
@@ -103,6 +105,7 @@ def _sparse_collate_fn(batch):
     data["instance_semantic_cls"] = torch.tensor(instance_cls, dtype=torch.int16)
     data["descr_tokens"] = torch.stack(descr_tokens)
     data["num_descr_tokens"] = num_descr_tokens
+    data["object_names"] = object_names
     data["descr_ids"] = descr_ids
     data["queried_objs"] = queried_objs
     data["num_instance"] = total_num_inst

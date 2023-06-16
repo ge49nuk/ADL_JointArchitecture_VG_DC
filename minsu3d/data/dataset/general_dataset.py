@@ -28,7 +28,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(scene_info['num_descr']):
+            for i in range(5): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
@@ -102,6 +102,7 @@ class GeneralDataset(Dataset):
         descr_dict = scene["object_descr"]
         descr_tokens = descr_dict["tokens"]   
         num_descr_tokens = descr_dict["num_tokens"] 
+        object_name = descr_dict["object_name"]
         queried_obj = descr_dict["object_id"]
         
 
@@ -187,6 +188,7 @@ class GeneralDataset(Dataset):
         data["instance_semantic_cls"] = instance_semantic_cls
         data["descr_tokens"] = descr_tokens
         data["num_descr_tokens"] = num_descr_tokens
+        data["object_name"] = object_name
         data["descr_id"] = descr_id
         data["queried_obj"] = queried_obj
 

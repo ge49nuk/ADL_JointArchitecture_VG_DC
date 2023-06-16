@@ -97,6 +97,7 @@ def read_descr_file(desc_file, agg_file, iou_0_set, scan):
         for ann_id in scan_data[obj_id]:
             instance_cpy = instance.copy()
             instance_cpy["ann_id"] = ann_id
+            instance_cpy["object_name"] = scan_data[obj_id][ann_id]["object_name"]
             descr = "[CLS] " + scan_data[obj_id][ann_id]["description"]
             descr = descr.replace('.',' [SEP]')
             if descr in seen_desc:
