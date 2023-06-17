@@ -146,8 +146,8 @@ class Transformer(nn.Module):
         # Dense captioning pass
         DC_loss = 0.0
         if num_target_proposals > 0:
-            for i, target_proposal in enumerate(target_proposals):
-                target_box_token = box_tokens[i]
+            for target_proposal in target_proposals:
+                target_box_token = box_tokens[target_proposal]
                 target_box_token = target_box_token.view(1, self.dim_model)
                 captioning_cue = text_tokens + target_box_token
                 assert captioning_cue.size() == (len_text_tokens, self.dim_model)
