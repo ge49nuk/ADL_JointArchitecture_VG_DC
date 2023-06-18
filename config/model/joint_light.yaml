@@ -1,0 +1,53 @@
+# Managed by Hydra
+
+ckpt_path: null
+quick_training: True
+
+logger:
+  # https://pytorch-lightning.readthedocs.io/en/stable/extensions/generated/pytorch_lightning.loggers.WandbLogger.html
+  _target_: pytorch_lightning.loggers.WandbLogger
+  project: ${model.network.module}
+  name: ${experiment_name}
+
+# https://pytorch-lightning.readthedocs.io/en/stable/common/trainer.html
+trainer:
+  accelerator: gpu
+  devices: auto
+  strategy: ddp_find_unused_parameters_true
+  num_nodes: 1
+  max_epochs: 200
+  num_sanity_val_steps: 10
+  check_val_every_n_epoch: 10
+  profiler: simple
+
+# https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html
+checkpoint_monitor:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  save_top_k: -1
+  every_n_epochs: 10 #${model.trainer.check_val_every_n_epoch}
+  filename: "{epoch}"
+  dirpath: ${exp_output_root_path}/training
+
+
+lr_decay:
+  decay_start_epoch: 200
+
+inference:
+  split: val
+  evaluate: False
+  save_predictions: True
+
+log:
+  WandbLogger:
+    project: Joint_Light
+    name: ${experiment_name}
+  TensorBoardLogger:
+    name: Joint_Light
+
+optimizer:
+    _target_: torch.optim.Adam
+    lr: 0.0001
+
+network:
+  module: Joint_Light
+

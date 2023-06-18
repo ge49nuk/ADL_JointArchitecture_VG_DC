@@ -1,0 +1,59 @@
+# Managed by Hydra
+
+defaults:
+  - base
+
+log:
+  WandbLogger:
+    project: Joint_Preprocess
+    name: ${experiment_name}
+  TensorBoardLogger:
+    name: Joint_Preprocess
+
+trainer:
+  max_epochs: 1
+  check_val_every_n_epoch: 40
+
+checkpoint_monitor:
+  _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  save_top_k: -1
+  every_n_epochs: 10000000 #${model.trainer.check_val_every_n_epoch}
+  filename: "{epoch}"
+  dirpath: ${exp_output_root_path}/training
+
+lr_decay:
+  decay_start_epoch: 2
+
+optimizer:
+    _target_: torch.optim.Adam
+    lr: 0.0001
+
+network:
+  module: Joint_Preprocess
+
+  m: 32 # 16 or 32
+  blocks: [1, 2, 3, 4, 5, 6, 7]
+  cluster_blocks: [1, 2]
+  block_reps: 2
+
+  use_color: True
+  use_normal: False
+
+  prepare_epochs: 0
+
+  grouping_cfg:
+    score_thr: 0.2
+    radius: 0.04
+    mean_active: 300
+    npoint_thr: 0.05  # absolute if class_numpoint == -1, relative if class_numpoint != -1
+
+  instance_voxel_cfg:
+    scale: 50
+    spatial_shape: 20
+  train_cfg:
+    max_proposal_num: 200
+    pos_iou_thr: 0.5
+  test_cfg:
+    cls_score_thr: 0.001
+    mask_score_thr: -0.5
+    min_npoint: 100

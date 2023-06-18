@@ -1,0 +1,10 @@
+# Managed by Hydra
+
+dataset_root_path: ${project_root_path}/data
+dataset: JointDataset
+dataset_path: ${data.dataset_root_path}/joint_data
+
+batch_size: 4
+num_workers: 4
+
+instance_size: 1200
