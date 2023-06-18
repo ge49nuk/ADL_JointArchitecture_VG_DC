@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import math
+import time
+import numpy as np
 
 class PositionalEncoding(nn.Module):
     def __init__(self, dim_model, dropout_p, max_len):
@@ -33,9 +35,11 @@ class PositionalEncoding(nn.Module):
 
 
 
-    
+#TODO: implement more points as input for VG_token
+
 class Transformer(nn.Module):
-    def __init__(self, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
+    def __init__(self, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.1, 
+                 nhead=1, nlayers=2, samples_per_box=40):
         super().__init__()
 
         self.model_type = "Transformer"
@@ -44,32 +48,40 @@ class Transformer(nn.Module):
         self.dim_wdfeats = dim_wdfeats
         self.size_vocab = size_vocab
         self.num_cls = num_cls
+        self.samples_per_box = samples_per_box
         
         # Layers
         # Transform point and word to have dimension=dim_model
         self.point_to_model = nn.Sequential(
-            nn.Linear(self.dim_ptfeats, 64),
-            nn.Linear(64, self.dim_model)
+            nn.Linear(self.dim_ptfeats*self.samples_per_box, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, self.dim_model)
         )
         self.word_to_model = nn.Sequential(
             nn.Linear(self.dim_wdfeats, 640),
+            nn.ReLU(),
             nn.Linear(640, self.dim_model)
         )
         # Transformer encoder
         self.positional_encoder = PositionalEncoding(self.dim_model, dropout_p, max_len=max_text_len)
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.dim_model, nhead=nhead)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
+        # decoder_layer = nn.TransformerDecoderLayer(d_model=)
+        # self.transformer_decoder = nn.TransformerDecoder()
         # Decoder layer: One score for each box token
         self.grdhead = nn.Sequential(
-            nn.Linear(self.dim_model, 64),
-            nn.Linear(64, self.dim_ptfeats),
-            nn.Linear(self.dim_ptfeats, 1)
+            nn.Linear(self.dim_model, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
         )
         # Decoder layer: (#Vocab) scores for each text token
         self.caphead = nn.Sequential(
             nn.Linear(self.dim_model, 640),
-            nn.Linear(640, self.dim_ptfeats),
-            nn.Linear(self.dim_ptfeats, self.size_vocab)
+            nn.Linear(640, self.size_vocab)
         )
         # Decoder layer: (#Classes) scores for each [CLS] token
         self.clshead = nn.Sequential(
@@ -96,10 +108,17 @@ class Transformer(nn.Module):
         counts = counts[:-1]
 
         point_features_chunks = torch.tensor_split(point_features, counts.cpu(), dim=0)
-        box_tokens = torch.stack([chunk.mean(dim=0) for chunk in point_features_chunks], dim=0)
-        assert box_tokens.size() == (num_proposals, self.dim_ptfeats)
+        point_features_chunks_perm = list(point_features_chunks)
+        for i,_ in enumerate(point_features_chunks):
+            point_features_chunks_perm[output_dict["permute_proposals"][i]] = point_features_chunks[i].cpu()
+        sampled_chunks = []
+        for chunk in point_features_chunks_perm:
+            # rand_indices = np.random.randint(len(chunk), size=self.samples_per_box)
+            sampled_chunks.append(chunk[:self.samples_per_box])
+        box_tokens = torch.stack([torch.tensor(chunk.flatten()) for chunk in sampled_chunks], dim=0)
+        assert box_tokens.size() == (num_proposals, self.dim_ptfeats*self.samples_per_box)
         
-        box_tokens = self.point_to_model(box_tokens)
+        box_tokens = self.point_to_model(box_tokens.cuda())
         assert box_tokens.size() == (num_proposals, self.dim_model)
         # Prepared: (box_tokens, unique_proposals_idx)
         
@@ -123,9 +142,12 @@ class Transformer(nn.Module):
 
         # Visual grounding pass
         global_box_token = box_tokens.mean(dim=0, keepdim=True)
-        global_visual_cue = text_tokens + global_box_token
+        global_visual_cue = torch.zeros((text_tokens.shape)).cuda()
+        for i, _ in enumerate(global_visual_cue):
+            global_visual_cue[i] = text_tokens[i] + global_box_token
         VG_tokens = torch.cat((box_tokens, global_visual_cue), dim=0)
         assert VG_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
+
         output_VG_tokens = self.transformer_encoder(VG_tokens)
         output_box_tokens = output_VG_tokens[:num_proposals]
         assert output_box_tokens.size() == (num_proposals, self.dim_model)

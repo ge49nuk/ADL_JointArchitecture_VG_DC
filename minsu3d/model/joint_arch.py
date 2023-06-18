@@ -85,11 +85,13 @@ class Joint_Arch(pl.LightningModule):
         ious_on_cluster = common_ops.get_mask_iou_on_cluster(
             proposals_idx, proposals_offset, data_dict["instance_ids"], data_dict["instance_num_point"]
         )
+        output_dict["permute_proposals"] = np.random.permutation(len(ious_on_cluster))
         # Collect proposals of highest IoU with GT
         best_proposals = []
         for o in queried_obj:
             ious_queried_obj = ious_on_cluster[:,o]
-            best_proposals.append(torch.argmax(ious_queried_obj))
+            best_proposal = torch.argmax(ious_queried_obj)
+            best_proposals.append(output_dict["permute_proposals"][best_proposal])
         output_dict["target_proposals"] = best_proposals
 
 
