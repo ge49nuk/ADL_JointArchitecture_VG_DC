@@ -7,6 +7,8 @@ import pytorch_lightning as pl
 from minsu3d.common_ops.functions import common_ops
 from transformers import BertConfig, BertModel
 from minsu3d.model.softgroup import SoftGroup
+import json
+import pickle
 
 class_names = [ 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf', 'picture',
                'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink',
@@ -31,13 +33,18 @@ class JointPreprocessModelT(pl.LightningModule):
             param.requires_grad = False
 
         self.lin = nn.Linear(1, 1)
+
         self.split = 'train'
+        self.scan_list = []
+
+        self.min_inst_size = 1000000
+        self.max_inst_size = 0
     
     def configure_optimizers(self):
         return hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=self.parameters())
 
     def forward(self, data_dict):
-        scene = data_dict["scan_ids"][0]
+        scan_id = data_dict["scan_ids"][0]
         
         # SoftGroup
         self.softgroup.eval()
@@ -48,6 +55,17 @@ class JointPreprocessModelT(pl.LightningModule):
         point_features = (output_dict["point_features"])[proposals_idx[:, 1]]
 
         _, counts = proposals_idx[:, 0].unique(return_counts=True)
+
+        min_count = counts.min()
+        max_count = counts.max()
+        if min_count < self.min_inst_size:
+            self.min_inst_size = min_count
+            with open(f"min_inst_size_{self.split}.txt", 'w') as f:
+                print(min_count, file=f)
+        if max_count > self.max_inst_size:
+            self.max_inst_size = max_count
+            with open(f"max_inst_size_{self.split}.txt", 'w') as f:
+                print(max_count, file=f)
 
         for i, count in enumerate(counts[:-1]):
             counts[i+1] += count
@@ -81,17 +99,41 @@ class JointPreprocessModelT(pl.LightningModule):
         target_class = torch.tensor(class_names == obj_name).float() # One-hot vector
 
         # Get descr_id for naming the file
-        descr_id = data_dict["descr_ids"][0]
-        scan_desc_id = scene + ":" + str(descr_id)
+        descr_id = str(data_dict["descr_ids"][0])
+        scan_desc_id = scan_id + ":" + descr_id
 
         
-        output_path = os.path.join(self.cfg.data.dataset_root_path, "joint_data")
-        os.makedirs(output_path, exist_ok=True)
-        os.makedirs(os.path.join(output_path, self.split), exist_ok=True)
-        torch.save({'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(), 'target_proposals': best_proposals,
-                    'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
-                    'queried_objs': queried_objs, 'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy(), 'scan_desc_id': scan_desc_id},
-               os.path.join(output_path, self.split, f"{scene}_{descr_id}.pth"))
+        output_folder = os.path.join(self.cfg.data.dataset_root_path, "joint_data", self.split)
+        scan_folder = os.path.join(output_folder, scan_id)
+        descr_folder = os.path.join(scan_folder, "descr")
+        # os.makedirs(scan_folder, exist_ok=True)
+        os.makedirs(descr_folder, exist_ok=True)
+        scan_file = os.path.join(scan_folder, f"{scan_id}.pth")
+        descr_file = os.path.join(descr_folder, f"{scan_desc_id}.pth")
+        
+
+        if scan_id not in self.scan_list:
+            torch.save({'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(), 'target_proposals': best_proposals,
+                    'queried_objs': queried_objs, 'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy()}, scan_file)
+            self.scan_list.append(scan_id)
+        torch.save({'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
+                      'scan_desc_id': scan_desc_id}, descr_file)
+        
+        # with open(full_path, 'wb') as fp:
+        #     pickle.dump(content, fp)
+
+        # with open(full_path, "w") as outfile:
+        #     print(content, file=outfile)
+        
+        # with open('json_data.json', 'w') as fp:
+        #     json.dump(content, fp)
+
+        # np.save(full_path, content)
+
+        # torch.save({'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(), 'target_proposals': best_proposals,
+        #             'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
+        #             'queried_objs': queried_objs, 'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy(), 'scan_desc_id': scan_desc_id},
+        #        os.path.join(output_path, self.split, f"{scene}_{descr_id}.txt"))
 
         return {}
 

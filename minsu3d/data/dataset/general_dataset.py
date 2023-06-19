@@ -28,7 +28,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(5): # scene_info['num_descr']
+            for i in range(scene_info['num_descr']): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
