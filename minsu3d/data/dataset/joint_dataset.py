@@ -51,7 +51,7 @@ class JointDataset(Dataset):
         
         # For testing
         data["proposals_idx"] = scan['proposals_idx']
-        data["queried_objs"] = descr['proposals_idx']
+        data["queried_objs"] = descr['queried_objs']
         data["instance_ids"] = scan['instance_ids']
         data["scan_desc_id"] = descr['scan_desc_id']
 

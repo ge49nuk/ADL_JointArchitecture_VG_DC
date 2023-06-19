@@ -96,7 +96,7 @@ def _collate_fn(batch):
         num_tokens.append(b["num_tokens"])
         target_classes.append(torch.from_numpy(b["target_class"]))
         
-        queried_objs.append(torch.from_numpy(b["queried_objs"]))
+        queried_objs.append(b["queried_objs"])
         proposals_idx.append(torch.from_numpy(b["proposals_idx"]))
         instance_ids.append(torch.from_numpy(b["instance_ids"]))
         scan_desc_id.append(b["scan_desc_id"])

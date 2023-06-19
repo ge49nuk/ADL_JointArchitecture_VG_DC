@@ -18,7 +18,32 @@ class Joint_Light(pl.LightningModule):
         self.transformer = Transformer_Light()
         
     def configure_optimizers(self):
-        return hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=self.parameters())
+        optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()))
+
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer=optimizer,
+            step_size=20,
+            gamma=0.8
+        )
+
+        return [optimizer], [scheduler]
+
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     optimizer=optimizer,
+        #     mode='min',
+        #     factor=0.8,
+        #     patience=20,
+        #     min_lr=0.0000001
+        # )
+
+        # return {
+        #     "optimizer": optimizer,
+        #     "lr_scheduler": {
+        #         "scheduler": scheduler,
+        #         "monitor": "val/total_loss",
+        #         "frequency": 30
+        #     },
+        # }
 
     def forward(self, data_dict):
         # Transformer
