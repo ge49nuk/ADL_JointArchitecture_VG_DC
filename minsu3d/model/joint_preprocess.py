@@ -113,10 +113,11 @@ class JointPreprocessModelT(pl.LightningModule):
         
 
         if scan_id not in self.scan_list:
-            torch.save({'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(), 'target_proposals': best_proposals,
-                    'queried_objs': queried_objs, 'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy()}, scan_file)
+            torch.save({'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(),
+                        'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy()}, scan_file)
             self.scan_list.append(scan_id)
-        torch.save({'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
+        torch.save({'target_proposals': best_proposals, 'queried_objs': queried_objs, 
+                    'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
                       'scan_desc_id': scan_desc_id}, descr_file)
         
         # with open(full_path, 'wb') as fp:
