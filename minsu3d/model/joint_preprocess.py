@@ -20,8 +20,7 @@ class JointPreprocessModelT(pl.LightningModule):
         self.cfg = cfg
         self.save_hyperparameters()
  
-        configuration = BertConfig()
-        self.bert = BertModel(configuration)
+        self.bert = BertModel.from_pretrained("bert-base-uncased")
 
         self.softgroup = SoftGroup(cfg=cfg)
         checkpoint = torch.load(cfg.model.ckpt_path_SG)
