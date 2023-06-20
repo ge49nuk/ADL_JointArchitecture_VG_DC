@@ -77,19 +77,26 @@ class Transformer_Light(nn.Module):
 
         # Define loss criterion
         self.loss_criterion = nn.CrossEntropyLoss()
+        self.loss_criterion_bce = nn.BCEWithLogitsLoss()
         
         # Initialize weights
         # self.init_weights()
+        self.seen = []
 
     def forward(self, data_dict):
         instances = data_dict['instances']
         scene_splits = data_dict['scene_splits']
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
-        text_embeddings = data_dict['text_embeddings']
+        text_embeddings = data_dict['text_embeddings'].detach().clone()
         target_word_ids = data_dict['target_word_ids']
         num_tokens = data_dict['num_tokens']
         target_classes = data_dict['target_classes']
+
+        # if str(text_embeddings) not in self.seen:
+        #         self.seen.append(str(text_embeddings))
+        #         print(str(text_embeddings))
+        # print(len(self.seen))
 
         # Transform point features and text embedding to have dim_model
         instances = self.point_to_model(instances)
@@ -117,6 +124,7 @@ class Transformer_Light(nn.Module):
             len_text_tokens = num_tokens[i] - 1
             box_tokens = scene
             text_tokens = text_embeddings[i][:len_text_tokens]  # word embeddings from BERT (start with [CLS], without [SEP])
+            # print(text_embeddings[i].shape)
 
             # Visual grouding pass
             global_box_token = box_tokens.mean(dim=0, keepdim=True)
@@ -132,14 +140,20 @@ class Transformer_Light(nn.Module):
             # Compute Matching loss
             Match_targets = torch.zeros((Match_scores.shape))
             num_target_proposals = best_proposals[i].size()[0]
+            
             for p in best_proposals[i]:
                 Match_targets[p] = 1.0 / num_target_proposals
-            Match_loss += self.loss_criterion(Match_scores, Match_targets.to("cuda"))
+            scene_loss = self.loss_criterion(Match_scores, Match_targets.to("cuda"))
+            # print(scene_loss, best_proposals[i], torch.argmax(Match_scores))
+            Match_loss += scene_loss
+            # Match_loss += self.loss_criterion(Match_scores, Match_targets.to("cuda"))
             # Compute CLS loss
             encoded_cls_token = output_VG_tokens[num_proposals]
             CLS_scores = self.clshead(encoded_cls_token)
             CLS_scores_list.append(CLS_scores)
-            CLS_loss += self.loss_criterion(CLS_scores, target_classes[i])
+            scene_loss = self.loss_criterion(CLS_scores, target_classes[i])
+            CLS_loss += scene_loss/num_proposals
+            # CLS_loss += self.loss_criterion(CLS_scores, target_classes[i])
             # Dense Captioning pass
             for target_proposal in best_proposals[i]:
                 target_box_token = box_tokens[target_proposal]

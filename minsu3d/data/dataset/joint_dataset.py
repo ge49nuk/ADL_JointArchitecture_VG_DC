@@ -21,6 +21,8 @@ class JointDataset(Dataset):
         self.scans_idx = []
         self.descrs = []
         for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
+            if scan_id == "_ignore":
+                continue
             scan_folder = os.path.join(split_folder, scan_id)
             scan_file = os.path.join(scan_folder, f"{scan_id}.pth")
             self.scans.append(torch.load(scan_file))
@@ -51,7 +53,7 @@ class JointDataset(Dataset):
         
         # For testing
         data["proposals_idx"] = scan['proposals_idx']
-        data["queried_objs"] = descr['queried_objs']
+        data["queried_objs"] = np.array(descr['queried_objs'])
         data["instance_ids"] = scan['instance_ids']
         data["scan_desc_id"] = descr['scan_desc_id']
 

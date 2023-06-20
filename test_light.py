@@ -33,11 +33,10 @@ def main(cfg):
     checkpoint = torch.load(cfg.model.ckpt_path)
     cfg.model.quick_training = False
     trainer.fit_loop.epoch_progress.current.completed = checkpoint["epoch"]  # TODO
-    trainer.test(model=model, datamodule=data_module)
+    trainer.test(model=model, datamodule=data_module, ckpt_path=cfg.model.ckpt_path)
 
 
 if __name__ == '__main__':
     main()
-
 
 
