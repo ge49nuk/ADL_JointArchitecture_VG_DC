@@ -61,6 +61,7 @@ def _sparse_collate_fn(batch):
     object_names = []
     descr_ids = []
     queried_objs = []
+    aug_ids = []
 
     for i, b in enumerate(batch):
         scan_ids.append(b["scan_id"])
@@ -92,8 +93,10 @@ def _sparse_collate_fn(batch):
         descr_ids.append(b["descr_id"])
 
         queried_objs.append(b["queried_obj"])
+        aug_ids.append(b["aug_id"])
 
     data['scan_ids'] = scan_ids
+    data["aug_ids"] = aug_ids
     data["point_xyz"] = torch.cat(point_xyz, dim=0)
     data["vert_batch_ids"] = torch.cat(vert_batch_ids, dim=0)
 

@@ -99,7 +99,7 @@ class JointPreprocessModelT(pl.LightningModule):
 
         # Get descr_id for naming the file
         descr_id = str(data_dict["descr_ids"][0])
-        scan_desc_id = scan_id + ":" + descr_id
+        scan_desc_id = scan_id + "::" + descr_id
 
         
         output_folder = os.path.join(self.cfg.data.dataset_root_path, "joint_data", self.split)
@@ -107,13 +107,18 @@ class JointPreprocessModelT(pl.LightningModule):
         descr_folder = os.path.join(scan_folder, "descr")
         # os.makedirs(scan_folder, exist_ok=True)
         os.makedirs(descr_folder, exist_ok=True)
-        scan_file = os.path.join(scan_folder, f"{scan_id}.pth")
+        aug_id = data_dict["aug_ids"][0]
+        scan_file = os.path.join(scan_folder, f"{aug_id}.pth")
         descr_file = os.path.join(descr_folder, f"{scan_desc_id}.pth")
         
+
+        if aug_id not in self.scan_list:
+            torch.save({'aug_id': aug_id, 'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(),
+                        'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy()}, scan_file)
+            self.scan_list.append(aug_id)
         torch.save({'target_proposals': best_proposals, 'queried_objs': queried_objs, 
                     'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(),
-                      'scan_desc_id': scan_desc_id, 'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(),
-                        'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy()}, descr_file)
+                      'scan_desc_id': scan_desc_id}, descr_file)
         
         # with open(full_path, 'wb') as fp:
         #     pickle.dump(content, fp)

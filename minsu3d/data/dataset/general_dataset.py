@@ -11,12 +11,15 @@ import random
 rand_descr_seed = 42
 
 
+
 class GeneralDataset(Dataset):
     def __init__(self, cfg, split):
         self.cfg = cfg
         self.split = split
         self.max_num_point = cfg.data.max_num_point
         self._load_from_disk()
+
+        self.aug_memory = {}
 
     def _load_from_disk(self):
         with open(getattr(self.cfg.data.metadata, f"{self.split}_list")) as f:
@@ -28,7 +31,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(min(25, scene_info['num_descr'])): # scene_info['num_descr']
+            for i in range(min(16, scene_info['num_descr'])): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
@@ -91,6 +94,20 @@ class GeneralDataset(Dataset):
     def __getitem__(self, idx):
         scene = self.scenes[idx]
         scene_id =scene["scene_id"]
+
+        # Saving augmented scenes
+        aug_matrix = self._get_augmentation_matrix()
+        if scene_id not in self.aug_memory:
+            self.aug_memory[scene_id] = [1,0] # times_seen,aug_id 
+        else:
+            entry = self.aug_memory[scene_id]
+            if entry[0] > 2: # Change this to modify the amount of generated aug scenes
+                self.aug_memory[scene_id] = [1, entry[1]+1]
+            else:
+                self.aug_memory[scene_id] = [entry[0]+1, entry[1]]
+        
+        aug_scene_id = scene["scene_id"] + ":" + str(self.aug_memory[scene_id][1])
+
         descr_id = scene["descr_id"]
 
         point_xyz = scene["xyz"].astype(np.float32)  # (N, 3)
@@ -107,11 +124,11 @@ class GeneralDataset(Dataset):
         
 
         data = {"scan_id": scene_id}
+        data["aug_id"] = aug_scene_id 
 
 
         #augment
         if self.split == "train":
-            aug_matrix = self._get_augmentation_matrix()
             point_xyz = np.matmul(point_xyz, aug_matrix)
             normals = np.matmul(normals, np.transpose(np.linalg.inv(aug_matrix)))
             if self.cfg.data.augmentation.jitter_rgb:
