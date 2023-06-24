@@ -28,7 +28,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(scene_info['num_descr']): # scene_info['num_descr']
+            for i in range(min(25, scene_info['num_descr'])): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
@@ -109,22 +109,22 @@ class GeneralDataset(Dataset):
         data = {"scan_id": scene_id}
 
 
-        # #augment
-        # if self.split == "train":
-        #     aug_matrix = self._get_augmentation_matrix()
-        #     point_xyz = np.matmul(point_xyz, aug_matrix)
-        #     normals = np.matmul(normals, np.transpose(np.linalg.inv(aug_matrix)))
-        #     if self.cfg.data.augmentation.jitter_rgb:
-        #         # jitter rgb
-        #         colors += np.random.randn(3) * 0.1
+        #augment
+        if self.split == "train":
+            aug_matrix = self._get_augmentation_matrix()
+            point_xyz = np.matmul(point_xyz, aug_matrix)
+            normals = np.matmul(normals, np.transpose(np.linalg.inv(aug_matrix)))
+            if self.cfg.data.augmentation.jitter_rgb:
+                # jitter rgb
+                colors += np.random.randn(3) * 0.1
 
-        # # elastic
+        # elastic
         scale = (1 / self.cfg.data.voxel_size)
-        # if self.split == "train" and self.cfg.data.augmentation.elastic:
-        #     point_xyz_elastic = elastic(point_xyz * scale, 6 * scale // 50, 40 * scale / 50)
-        #     point_xyz_elastic = elastic(point_xyz_elastic, 20 * scale // 50, 160 * scale / 50)
-        # else:
-        point_xyz_elastic = point_xyz * scale
+        if self.split == "train" and self.cfg.data.augmentation.elastic:
+            point_xyz_elastic = elastic(point_xyz * scale, 6 * scale // 50, 40 * scale / 50)
+            point_xyz_elastic = elastic(point_xyz_elastic, 20 * scale // 50, 160 * scale / 50)
+        else:
+            point_xyz_elastic = point_xyz * scale
 
         point_xyz_elastic -= point_xyz_elastic.min(axis=0)
 

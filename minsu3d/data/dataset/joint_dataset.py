@@ -24,26 +24,24 @@ class JointDataset(Dataset):
             if scan_id == "_ignore":
                 continue
             scan_folder = os.path.join(split_folder, scan_id)
-            scan_file = os.path.join(scan_folder, f"{scan_id}.pth")
-            self.scans.append(torch.load(scan_file))
             descr_folder = os.path.join(scan_folder, "descr")
             descr_fns = os.listdir(descr_folder)
             for descr_fn in descr_fns:
                 self.scans_idx.append(len(self.scans) - 1) # Mapping: idx -> scan
                 descr_file = os.path.join(descr_folder, descr_fn)
                 self.descrs.append(torch.load(descr_file))
+                     
 
     def __len__(self):
         return len(self.scans_idx)
    
     
     def __getitem__(self, idx):
-        scan = self.scans[self.scans_idx[idx]]
         descr = self.descrs[idx]
         
         # For light training
-        data = {"point_features": scan["point_features"]}
-        data["instance_splits"] = scan["instance_splits"]
+        data = {"point_features": descr["point_features"]}
+        data["instance_splits"] = descr["instance_splits"]
         data["target_proposals"] = descr['target_proposals']
         data["num_target_proposals"] = descr["target_proposals"].shape[0]
         data["text_embedding"] = descr['text_embedding'] 
@@ -52,9 +50,9 @@ class JointDataset(Dataset):
         data["target_class"] = descr['target_class']
         
         # For testing
-        data["proposals_idx"] = scan['proposals_idx']
+        data["proposals_idx"] = descr['proposals_idx']
         data["queried_objs"] = np.array(descr['queried_objs'])
-        data["instance_ids"] = scan['instance_ids']
+        data["instance_ids"] = descr['instance_ids']
         data["scan_desc_id"] = descr['scan_desc_id']
 
         return data

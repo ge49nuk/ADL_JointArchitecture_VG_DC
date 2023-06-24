@@ -7,6 +7,7 @@ import os
 import sys
 import pytorch_lightning as pl
 from minsu3d.model.transformer_light import Transformer_Light
+from transformers import BertConfig, BertModel
 from minsu3d.util.io import save_prediction_joint_arch
 
 
@@ -16,6 +17,9 @@ class Joint_Light(pl.LightningModule):
         self.save_hyperparameters()
         self.val_test_step_outputs = []
         self.transformer = Transformer_Light()
+
+        self.correct_guesses_train = [0,0]
+        self.correct_guesses_val = [0,0]
         
     def configure_optimizers(self):
         optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()))
@@ -48,7 +52,7 @@ class Joint_Light(pl.LightningModule):
     def forward(self, data_dict):
         # Transformer
         transformer_out = self.transformer(data_dict)
-        
+        # print(torch.max(transformer_out["DC_scores"][0], dim=1))
         return transformer_out
 
 
@@ -76,6 +80,17 @@ class Joint_Light(pl.LightningModule):
             on_epoch=True, batch_size=batch_size
         )
         self.log("train_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True,  batch_size=batch_size)
+    
+        batch_size = len(data_dict["scan_desc_id"])
+        target_proposals = data_dict['target_proposals']
+        target_proposal_splits = data_dict['target_proposal_splits']
+        for bi in range(batch_size):
+            best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
+            # Log correct guesses
+            self.correct_guesses_train[1] += 1
+            if torch.argmax(output_dict["Match_scores"][bi]) in best_proposals[bi]:
+                self.correct_guesses_train[0] += 1
+        
         return total_loss
     
     # def on_train_epoch_end(self):
@@ -95,9 +110,22 @@ class Joint_Light(pl.LightningModule):
             self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
         self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
 
+        target_proposals = data_dict['target_proposals']
+        target_proposal_splits = data_dict['target_proposal_splits']
+        best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
+        # Log correct guesses
+        self.correct_guesses_val[1] += 1
+        if torch.argmax(output_dict["Match_scores"][0]) in best_proposals[0]:
+            self.correct_guesses_val[0] += 1
 
+
+    def on_train_epoch_end(self):
+        self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=4)
+        self.correct_guesses_train = [0,0]
+    
     def on_validation_epoch_end(self):
-        pass
+        self.log("val/acc", self.correct_guesses_val[0]/self.correct_guesses_val[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=1)
+        # pass
         #     self.log("val_eval/AP", inst_seg_eval_result["all_ap"], sync_dist=True)
         #     self.log("val_eval/AP 50%", inst_seg_eval_result['all_ap_50%'], sync_dist=True)
         #     self.log("val_eval/AP 25%", inst_seg_eval_result["all_ap_25%"], sync_dist=True)

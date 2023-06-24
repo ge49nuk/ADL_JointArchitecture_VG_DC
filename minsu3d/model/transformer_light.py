@@ -111,7 +111,6 @@ class Transformer_Light(nn.Module):
 
         num_scenes = len(scenes) # = batch size
         num_instances = torch.diff(torch.tensor(scene_splits)) # Number of instances in each scene
-        
 
         Match_scores_list = []
         CLS_scores_list = []
