@@ -20,6 +20,8 @@ class Joint_Light(pl.LightningModule):
 
         self.correct_guesses_train = [0,0]
         self.correct_guesses_val = [0,0]
+        self.iou25_val = [0,0]
+        self.iou50_val = [0,0]
         
     def configure_optimizers(self):
         optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()))
@@ -110,14 +112,25 @@ class Joint_Light(pl.LightningModule):
             self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
         self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
 
+
+
+        # Log correct guesses
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
         best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
-        # Log correct guesses
-        self.correct_guesses_val[1] += 1
-        if torch.argmax(output_dict["Match_scores"][0]) in best_proposals[0]:
-            self.correct_guesses_val[0] += 1
 
+        self.correct_guesses_val[1] += 1
+        self.iou25_val[1] += 1
+        self.iou50_val[1] += 1
+
+        guess = torch.argmax(output_dict["Match_scores"][0])
+        if guess in best_proposals[0]:
+            self.correct_guesses_val[0] += 1
+        for o in data_dict["queried_objs"][0]:
+            if data_dict["ious_on_cluster"][0][guess][o] >= 0.25:
+                self.iou25_val[0] += 1
+                if data_dict["ious_on_cluster"][0][guess][o] >= 0.5:
+                    self.iou50_val[0] += 1
 
     def on_train_epoch_end(self):
         self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=4)
@@ -125,6 +138,10 @@ class Joint_Light(pl.LightningModule):
     
     def on_validation_epoch_end(self):
         self.log("val/acc", self.correct_guesses_val[0]/self.correct_guesses_val[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=1)
+        print("\nIOU25(val):", self.iou25_val[0]/self.iou25_val[1], "IOU50(val):",self.iou50_val[0]/self.iou50_val[1], "\n")
+        self.correct_guesses_val = [0,0]
+        self.iou25_val = [0,0]
+        self.iou50_val = [0,0]
         # pass
         #     self.log("val_eval/AP", inst_seg_eval_result["all_ap"], sync_dist=True)
         #     self.log("val_eval/AP 50%", inst_seg_eval_result['all_ap_50%'], sync_dist=True)

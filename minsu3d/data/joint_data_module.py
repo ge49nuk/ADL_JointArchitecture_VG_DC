@@ -76,6 +76,7 @@ def _collate_fn(batch):
     target_word_ids = []
     num_tokens = []
     target_classes = []
+    ious_on_cluster = []
 
     queried_objs = []
     proposals_idx = []
@@ -100,6 +101,7 @@ def _collate_fn(batch):
         proposals_idx.append(torch.from_numpy(b["proposals_idx"]))
         instance_ids.append(torch.from_numpy(b["instance_ids"]))
         scan_desc_id.append(b["scan_desc_id"])
+        ious_on_cluster.append(b["ious_on_cluster"])
     
     data = {'instances': torch.cat(instances, dim=0)}
     data['scene_splits'] = scene_splits # need to extract [1:-1]
@@ -109,6 +111,7 @@ def _collate_fn(batch):
     data['target_word_ids'] = torch.stack(target_word_ids, dim=0)
     data['num_tokens'] = num_tokens
     data['target_classes'] = target_classes
+    data["ious_on_cluster"] = ious_on_cluster
 
     data['queried_objs'] = queried_objs
     data['proposals_idx'] = proposals_idx

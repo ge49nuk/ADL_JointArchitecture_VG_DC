@@ -13,6 +13,7 @@ class JointDataset(Dataset):
         self.split = split
         # self.max_num_point = cfg.data.max_num_point
         self.instance_size = cfg.data.instance_size
+        self.augs_per_scene = 5
         self._load_from_disk()
 
     def _load_from_disk(self):
@@ -28,10 +29,11 @@ class JointDataset(Dataset):
                 continue
             scan_folder = os.path.join(split_folder, scan_id)
             scan_fns = os.listdir(scan_folder)
-            num_augs = len(scan_fns)-1
+            num_augs = 0
             for scan_fn in scan_fns:
-                if scan_fn == "descr":
+                if scan_fn == "descr" or num_augs >= self.augs_per_scene:
                     continue
+                num_augs += 1
                 scan_file = os.path.join(scan_folder, f"{scan_fn}")
                 self.scans.append(torch.load(scan_file))
             descr_folder = os.path.join(scan_folder, "descr")
@@ -64,6 +66,7 @@ class JointDataset(Dataset):
         data = {"point_features": scan["point_features"]}
         data["instance_splits"] = scan["instance_splits"]
         data["target_proposals"] = best_proposals
+        data["ious_on_cluster"] = scan['ious_on_cluster']
         
         data["num_target_proposals"] = data["target_proposals"].shape[0]
         data["text_embedding"] = descr['text_embedding'] 
