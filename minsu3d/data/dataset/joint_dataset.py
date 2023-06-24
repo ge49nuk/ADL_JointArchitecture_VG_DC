@@ -52,11 +52,19 @@ class JointDataset(Dataset):
         scan = self.scans[random.randint(scan_id_range[0], scan_id_range[1]-1)]
         descr = self.descrs[idx]
         # print("Loaded scan", scan["aug_id"], "for description", descr["scan_desc_id"])
+
+        # Calculate best proposals
+        best_proposals = []
+        for o in descr['queried_objs']:
+            ious_queried_obj = scan['ious_on_cluster'][:,o]
+            best_proposals.append((torch.argmax(ious_queried_obj)).cpu().numpy())
+        best_proposals = np.asarray(best_proposals)
         
         # For light training
         data = {"point_features": scan["point_features"]}
         data["instance_splits"] = scan["instance_splits"]
-        data["target_proposals"] = descr['target_proposals']
+        data["target_proposals"] = best_proposals
+        
         data["num_target_proposals"] = descr["target_proposals"].shape[0]
         data["text_embedding"] = descr['text_embedding'] 
         data["target_word_ids"] = descr['target_word_ids'] 
