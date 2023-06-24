@@ -18,7 +18,9 @@ class GeneralDataset(Dataset):
         self.split = split
         self.max_num_point = cfg.data.max_num_point
         self._load_from_disk()
-
+        
+        self.num_desc = 16  
+        self.augs_per_scene = 4
         self.aug_memory = {}
 
     def _load_from_disk(self):
@@ -31,7 +33,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(min(16, scene_info['num_descr'])): # scene_info['num_descr']
+            for i in range(min(self.num_desc, scene_info['num_descr'])): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
@@ -101,7 +103,7 @@ class GeneralDataset(Dataset):
             self.aug_memory[scene_id] = [1,0] # times_seen,aug_id 
         else:
             entry = self.aug_memory[scene_id]
-            if entry[0] > 2: # Change this to modify the amount of generated aug scenes
+            if entry[0] > (self.num_desc / self.augs_per_scene) and entry[1] < self.augs_per_scene-1: 
                 self.aug_memory[scene_id] = [1, entry[1]+1]
             else:
                 self.aug_memory[scene_id] = [entry[0]+1, entry[1]]
