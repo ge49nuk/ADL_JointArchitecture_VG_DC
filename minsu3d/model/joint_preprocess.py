@@ -110,7 +110,7 @@ class JointPreprocessModelT(pl.LightningModule):
         if aug_id not in self.scan_list:
             torch.save({'aug_id': aug_id, 'point_features': point_features.cpu().numpy(), 'instance_splits': instance_splits.cpu().numpy(),
                         'proposals_idx': output_dict["proposals_idx"].cpu().numpy(), 'instance_ids': data_dict["instance_ids"].cpu().numpy(),
-                        'ious_on_cluster': ious_on_cluster}, scan_file)
+                        'ious_on_cluster': ious_on_cluster.cpu().numpy()}, scan_file)
             self.scan_list.append(aug_id)
         torch.save({'queried_objs': queried_objs, 'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 
                     'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(), 'scan_desc_id': scan_desc_id}, descr_file)

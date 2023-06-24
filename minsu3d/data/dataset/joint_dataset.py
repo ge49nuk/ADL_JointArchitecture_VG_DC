@@ -57,7 +57,7 @@ class JointDataset(Dataset):
         best_proposals = []
         for o in descr['queried_objs']:
             ious_queried_obj = scan['ious_on_cluster'][:,o]
-            best_proposals.append((torch.argmax(ious_queried_obj)).cpu().numpy())
+            best_proposals.append((np.argmax(ious_queried_obj)))
         best_proposals = np.asarray(best_proposals)
         
         # For light training
@@ -65,7 +65,7 @@ class JointDataset(Dataset):
         data["instance_splits"] = scan["instance_splits"]
         data["target_proposals"] = best_proposals
         
-        data["num_target_proposals"] = descr["target_proposals"].shape[0]
+        data["num_target_proposals"] = data["target_proposals"].shape[0]
         data["text_embedding"] = descr['text_embedding'] 
         data["target_word_ids"] = descr['target_word_ids'] 
         data["num_tokens"] = descr['num_tokens'] 
