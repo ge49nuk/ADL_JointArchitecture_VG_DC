@@ -9,6 +9,10 @@ import pytorch_lightning as pl
 from minsu3d.model.transformer_light import Transformer_Light
 from transformers import BertConfig, BertModel
 from minsu3d.util.io import save_prediction_joint_arch
+import minsu3d.capeval.bleu.bleu as capblue
+import minsu3d.capeval.cider.cider as capcider
+import minsu3d.capeval.rouge.rouge as caprouge
+import minsu3d.capeval.meteor.meteor as capmeteor
 
 
 class Joint_Light(pl.LightningModule):
@@ -23,6 +27,11 @@ class Joint_Light(pl.LightningModule):
         self.correct_guesses_val = [0,0]
         self.iou25_val = [0,0]
         self.iou50_val = [0,0]
+
+        self.corpus_iou25 = {}
+        self.candidates_iou25 = {}
+        self.corpus_iou50 = {}
+        self.candidates_iou50 = {}
         
     def configure_optimizers(self):
         optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()))
@@ -134,8 +143,16 @@ class Joint_Light(pl.LightningModule):
                 for o in data_dict["queried_objs"][bi]:
                     if data_dict["ious_on_cluster"][bi][guess][o] >= 0.25:
                         self.iou25_val[0] += 1
+                        key = data_dict["scan_desc_id"][bi]
+                        candidate_descr = output_dict["candidate_descrs"][bi]
+                        gt_descr = output_dict["gt_descrs"][bi]
+                        self.corpus_iou25[key] = [gt_descr]
+                        self.candidates_iou25[key] = [candidate_descr]
                         if data_dict["ious_on_cluster"][bi][guess][o] >= 0.5:
                             self.iou50_val[0] += 1
+                            self.corpus_iou50[key] = [gt_descr]
+                            self.candidates_iou50[key] = [candidate_descr]
+
 
     def on_train_epoch_end(self):
         self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], 
@@ -149,6 +166,28 @@ class Joint_Light(pl.LightningModule):
         self.correct_guesses_val = [0,0]
         self.iou25_val = [0,0]
         self.iou50_val = [0,0]
+        
+        bleu4_iou25 = capblue.Bleu(4).compute_score(self.corpus_iou25, self.candidates_iou25)[0][3]
+        cider_iou25 = capcider.Cider().compute_score(self.corpus_iou25, self.candidates_iou25)[0]
+        rouge_iou25 = caprouge.Rouge().compute_score(self.corpus_iou25, self.candidates_iou25)[0]
+        meteor_iou25 = capmeteor.Meteor().compute_score(self.corpus_iou25, self.candidates_iou25)[0]
+        bleu4_iou50 = capblue.Bleu(4).compute_score(self.corpus_iou50, self.candidates_iou50)[0][3]
+        cider_iou50 = capcider.Cider().compute_score(self.corpus_iou50, self.candidates_iou50)[0]
+        rouge_iou50 = caprouge.Rouge().compute_score(self.corpus_iou50, self.candidates_iou50)[0]
+        meteor_iou50 = capmeteor.Meteor().compute_score(self.corpus_iou50, self.candidates_iou50)[0]
+
+        self.log("val/bleu4_iou25", bleu4_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/cider_iou25", cider_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/rouge_iou25", rouge_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/meteor_iou25", meteor_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/bleu4_iou50", bleu4_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/cider_iou50", cider_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/rouge_iou50", rouge_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/meteor_iou50", meteor_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.corpus_iou25 = {}
+        self.candidates_iou25 = {}
+        self.corpus_iou50 = {}
+        self.candidates_iou50 = {}
         # pass
         #     self.log("val_eval/AP", inst_seg_eval_result["all_ap"], sync_dist=True)
         #     self.log("val_eval/AP 50%", inst_seg_eval_result['all_ap_50%'], sync_dist=True)
