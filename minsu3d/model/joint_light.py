@@ -17,6 +17,7 @@ class Joint_Light(pl.LightningModule):
         self.save_hyperparameters()
         self.val_test_step_outputs = []
         self.transformer = Transformer_Light()
+        self.batch_size = cfg.data.batch_size
 
         self.correct_guesses_train = [0,0]
         self.correct_guesses_val = [0,0]
@@ -70,28 +71,31 @@ class Joint_Light(pl.LightningModule):
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
         total_loss = 0
-        batch_size = len(data_dict['scan_desc_id'])
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
             self.log(
                 f"train/{loss_name}", loss_value, on_step=False, sync_dist=True,
-                on_epoch=True, batch_size=batch_size
+                on_epoch=True, batch_size=self.batch_size
             )
         self.log(
             "train/total_loss", total_loss, on_step=False, sync_dist=True,
-            on_epoch=True, batch_size=batch_size
+            on_epoch=True, batch_size=self.batch_size
         )
-        self.log("train_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True,  batch_size=batch_size)
+        self.log("train_loss", total_loss, prog_bar=True, sync_dist=True, on_step=False, on_epoch=True,  batch_size=self.batch_size)
     
-        batch_size = len(data_dict["scan_desc_id"])
+        # Log accuracy 
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
-        for bi in range(batch_size):
-            best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
-            # Log correct guesses
-            self.correct_guesses_train[1] += 1
-            if torch.argmax(output_dict["Match_scores"][bi]) in best_proposals[bi]:
-                self.correct_guesses_train[0] += 1
+        best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
+
+        if self.batch_size == len(output_dict["Match_scores"]): # check if we have a full batch, dont log if not
+            for bi in range(self.batch_size):
+                if self.batch_size > len(output_dict["Match_scores"]):
+                    break
+                # Log correct guesses
+                self.correct_guesses_train[1] += 1
+                if torch.argmax(output_dict["Match_scores"][bi]) in best_proposals[bi]:
+                    self.correct_guesses_train[0] += 1
         
         return total_loss
     
@@ -109,8 +113,8 @@ class Joint_Light(pl.LightningModule):
         total_loss = 0
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
-            self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
-        self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=1)
+            self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
+        self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
 
 
 
@@ -118,26 +122,29 @@ class Joint_Light(pl.LightningModule):
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
         best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
-
-        self.correct_guesses_val[1] += 1
-        self.iou25_val[1] += 1
-        self.iou50_val[1] += 1
-
-        guess = torch.argmax(output_dict["Match_scores"][0])
-        if guess in best_proposals[0]:
-            self.correct_guesses_val[0] += 1
-        for o in data_dict["queried_objs"][0]:
-            if data_dict["ious_on_cluster"][0][guess][o] >= 0.25:
-                self.iou25_val[0] += 1
-                if data_dict["ious_on_cluster"][0][guess][o] >= 0.5:
-                    self.iou50_val[0] += 1
+        
+        if self.batch_size == len(output_dict["Match_scores"]): # check if we have a full batch, dont log if not
+            self.correct_guesses_val[1] += self.batch_size
+            self.iou25_val[1] += self.batch_size
+            self.iou50_val[1] += self.batch_size
+            for bi in range(self.batch_size): 
+                guess = torch.argmax(output_dict["Match_scores"][bi])
+                if guess in best_proposals[bi]:
+                    self.correct_guesses_val[0] += 1
+                for o in data_dict["queried_objs"][bi]:
+                    if data_dict["ious_on_cluster"][bi][guess][o] >= 0.25:
+                        self.iou25_val[0] += 1
+                        if data_dict["ious_on_cluster"][bi][guess][o] >= 0.5:
+                            self.iou50_val[0] += 1
 
     def on_train_epoch_end(self):
-        self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=4)
+        self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], 
+                 prog_bar=True, on_step=False, on_epoch=True,  batch_size=self.batch_size, sync_dist=True)
         self.correct_guesses_train = [0,0]
     
     def on_validation_epoch_end(self):
-        self.log("val/acc", self.correct_guesses_val[0]/self.correct_guesses_val[1], prog_bar=True, on_step=False, on_epoch=True,  batch_size=1)
+        self.log("val/acc", self.correct_guesses_val[0]/self.correct_guesses_val[1], prog_bar=True, 
+                 on_step=False, on_epoch=True,  batch_size=self.batch_size, sync_dist=True)
         print("\nIOU25(val):", self.iou25_val[0]/self.iou25_val[1], "IOU50(val):",self.iou50_val[0]/self.iou50_val[1], "\n")
         self.correct_guesses_val = [0,0]
         self.iou25_val = [0,0]
