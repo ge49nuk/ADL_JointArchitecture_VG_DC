@@ -33,7 +33,8 @@ class PositionalEncoder(nn.Module):
 
     
 class Transformer_Light(nn.Module):
-    def __init__(self, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2):
+    def __init__(self, dim_model=512, dim_ptfeats=32, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.1, nhead=1, nlayers=2,
+                 samples_per_box=256):
         super().__init__()
 
         self.model_type = "Transformer"
@@ -42,11 +43,12 @@ class Transformer_Light(nn.Module):
         self.dim_wdfeats = dim_wdfeats
         self.size_vocab = size_vocab
         self.num_cls = num_cls
+        self.samples_per_box = samples_per_box
         
         # Transform point and word to have dimension=dim_model
         self.point_to_model = nn.Sequential(
-            nn.Linear(self.dim_ptfeats, 64),
-            nn.Linear(64, self.dim_model)
+            nn.Linear(self.dim_ptfeats*self.samples_per_box, 1024),
+            nn.Linear(1024, self.dim_model)
         )
         self.word_to_model = nn.Sequential(
             nn.Linear(self.dim_wdfeats, 640),
@@ -84,8 +86,8 @@ class Transformer_Light(nn.Module):
         self.seen = []
 
     def forward(self, data_dict):
-        instances = data_dict['instances']
-        scene_splits = data_dict['scene_splits']
+        proposals_batched = data_dict['proposals']
+        batch_splits = data_dict['batch_splits']
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
         text_embeddings = data_dict['text_embeddings'].detach().clone()
@@ -93,24 +95,34 @@ class Transformer_Light(nn.Module):
         num_tokens = data_dict['num_tokens']
         target_classes = data_dict['target_classes']
 
-        # if str(text_embeddings) not in self.seen:
-        #         self.seen.append(str(text_embeddings))
-        #         print(str(text_embeddings))
-        # print(len(self.seen))
-
-        # Transform point features and text embedding to have dim_model
-        instances = self.point_to_model(instances)
+        # Transform text embedding to have dim_model
         text_embeddings = self.word_to_model(text_embeddings)
         text_embeddings = self.positional_encoder(text_embeddings)
 
-        # Get scenes:
-        scenes = torch.tensor_split(instances, scene_splits[1:-1], dim=0)
-        scenes = [scene.mean(dim=1) for scene in scenes] # Can consider to use max pooling instead of mean pooling
+        # Transform proposal to dim_model:
+        proposals_batched = torch.tensor_split(proposals_batched, batch_splits[1:-1], dim=0)
+
+        proposals_t = []
+        for props in proposals_batched:
+            proposals_t.append(self.point_to_model(props.to("cuda")))
+        # scenes_sampled = []
+        # for scene in scenes:
+        #     proposals = torch.zeros((scene.shape[0], self.dim_ptfeats * self.samples_per_box))
+        #     for i,proposal in enumerate(scene):
+        #         num_samples = self.samples_per_box
+        #         feature_means = torch.mean(proposal, dim=1)
+        #         sampled_indices = torch.topk(feature_means, num_samples)[1]
+        #         sampled_chunk = proposal[sampled_indices]
+        #         proposals[i] = sampled_chunk.flatten()
+        #     proposals = self.point_to_model(proposals.to("cuda"))
+        #     scenes_sampled.append(proposals)
+        # scenes = scenes_sampled
+
         # Get target_proposals
         best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
 
-        num_scenes = len(scenes) # = batch size
-        num_instances = torch.diff(torch.tensor(scene_splits)) # Number of instances in each scene
+        num_scenes = len(proposals_t) # = batch size
+        num_instances = [props.shape[0] for props in proposals_t] # Number of instances in each scene
 
         Match_scores_list = []
         CLS_scores_list = []
@@ -118,10 +130,10 @@ class Transformer_Light(nn.Module):
         Match_loss = 0.0
         CLS_loss = 0.0
         DC_loss = 0.0
-        for i, scene in enumerate(scenes):
+        for i, props in enumerate(proposals_t):
             num_proposals = num_instances[i]
             len_text_tokens = num_tokens[i] - 1
-            box_tokens = scene
+            box_tokens = props
             text_tokens = text_embeddings[i][:len_text_tokens]  # word embeddings from BERT (start with [CLS], without [SEP])
             # print(text_embeddings[i].shape)
 
