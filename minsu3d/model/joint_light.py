@@ -5,9 +5,9 @@ import math
 import hydra
 import os
 import sys
+import json
 import pytorch_lightning as pl
 from minsu3d.model.transformer_light import Transformer_Light
-from transformers import BertConfig, BertModel
 from minsu3d.util.io import save_prediction_joint_arch
 import minsu3d.capeval.bleu.bleu as capblue
 import minsu3d.capeval.cider.cider as capcider
@@ -32,9 +32,11 @@ class Joint_Light(pl.LightningModule):
         self.candidates_iou25 = {}
         self.corpus_iou50 = {}
         self.candidates_iou50 = {}
+
+        self.epoch_count = 0
         
     def configure_optimizers(self):
-        optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()))
+        optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()), weight_decay=1e-4)
 
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer=optimizer,
@@ -80,24 +82,22 @@ class Joint_Light(pl.LightningModule):
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
         total_loss = 0
+        batch_size = len(output_dict["Match_scores"])
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
             self.log(
                 f"train/{loss_name}", loss_value, on_step=False, sync_dist=True,
-                on_epoch=True, batch_size=self.batch_size
+                on_epoch=True, batch_size=batch_size
             )
-        self.log(
-            "train/total_loss", total_loss, on_step=False, sync_dist=True,
-            on_epoch=True, batch_size=self.batch_size
-        )
-        self.log("train_loss", total_loss, prog_bar=True, sync_dist=True, on_step=False, on_epoch=True,  batch_size=self.batch_size)
+        self.log("train/total_loss", total_loss, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
+        self.log("train_loss", total_loss, prog_bar=True, sync_dist=True, on_step=False, on_epoch=True,  batch_size=batch_size)
     
         # Log accuracy 
         target_proposals = data_dict['target_proposals']
         target_proposal_splits = data_dict['target_proposal_splits']
         best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
 
-        if self.batch_size == len(output_dict["Match_scores"]): # check if we have a full batch, dont log if not
+        if self.batch_size == batch_size: # check if we have a full batch, dont log if not
             for bi in range(self.batch_size):
                 if self.batch_size > len(output_dict["Match_scores"]):
                     break
@@ -117,14 +117,14 @@ class Joint_Light(pl.LightningModule):
     def validation_step(self, data_dict, idx):
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
+        batch_size = len(output_dict["Match_scores"])
 
         # log losses
         total_loss = 0
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
-            self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
-        self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=self.batch_size)
-
+            self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
+        self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
 
 
         # Log correct guesses
@@ -132,7 +132,7 @@ class Joint_Light(pl.LightningModule):
         target_proposal_splits = data_dict['target_proposal_splits']
         best_proposals = torch.tensor_split(target_proposals, target_proposal_splits[1:-1], dim=0)
         
-        if self.batch_size == len(output_dict["Match_scores"]): # check if we have a full batch, dont log if not
+        if self.batch_size == batch_size: # check if we have a full batch, dont log if not
             self.correct_guesses_val[1] += self.batch_size
             self.iou25_val[1] += self.batch_size
             self.iou50_val[1] += self.batch_size
@@ -155,17 +155,24 @@ class Joint_Light(pl.LightningModule):
 
 
     def on_train_epoch_end(self):
-        self.log("train/acc", self.correct_guesses_train[0]/self.correct_guesses_train[1], 
-                 prog_bar=True, on_step=False, on_epoch=True,  batch_size=self.batch_size, sync_dist=True)
+        # train_acc = 0.0
+        # if not self.correct_guesses_train[1] == 0:
+        train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
+        self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.correct_guesses_train = [0,0]
     
     def on_validation_epoch_end(self):
-        self.log("val/acc", self.correct_guesses_val[0]/self.correct_guesses_val[1], prog_bar=True, 
-                 on_step=False, on_epoch=True,  batch_size=self.batch_size, sync_dist=True)
-        print("\nIOU25(val):", self.iou25_val[0]/self.iou25_val[1], "IOU50(val):",self.iou50_val[0]/self.iou50_val[1], "\n")
-        self.correct_guesses_val = [0,0]
-        self.iou25_val = [0,0]
-        self.iou50_val = [0,0]
+        # val_acc = 0.0
+        # iou25 = 0.0
+        # iou50 = 0.0
+        # if not self.correct_guesses_val[1] == 0.0:
+        val_acc = self.correct_guesses_val[0]/self.correct_guesses_val[1]
+        # if not self.iou25_val[1] == 0:
+        iou25 = self.iou25_val[0]/self.iou25_val[1]
+        # if not self.iou50_val[1] == 0:
+        iou50 = self.iou50_val[0]/self.iou50_val[1]
+        self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
         
         bleu4_iou25 = capblue.Bleu(4).compute_score(self.corpus_iou25, self.candidates_iou25)[0][3]
         cider_iou25 = capcider.Cider().compute_score(self.corpus_iou25, self.candidates_iou25)[0]
@@ -176,24 +183,42 @@ class Joint_Light(pl.LightningModule):
         rouge_iou50 = caprouge.Rouge().compute_score(self.corpus_iou50, self.candidates_iou50)[0]
         meteor_iou50 = capmeteor.Meteor().compute_score(self.corpus_iou50, self.candidates_iou50)[0]
 
-        self.log("val/bleu4_iou25", bleu4_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'val_scores')
+        os.makedirs(folder_path, exist_ok=True)
+        score_path = os.path.join(folder_path, "epoch_{}.json".format(self.epoch_count))
+        self.epoch_count += 10
+
+        scores = {
+                "iou25": iou25,
+                "iou50": iou50,
+                "bleu4_iou25": bleu4_iou25,
+                "cider_iou25": cider_iou25,
+                "rouge_iou25": rouge_iou25,
+                "meteor_iou25": meteor_iou25,
+                "bleu4_iou50": bleu4_iou50,
+                "cider_iou50": cider_iou50,
+                "rouge_iou50": rouge_iou50,
+                "meteor_iou50": meteor_iou50
+                }
+        with open(score_path, "w") as f:
+            json.dump(scores, f, indent=4)
+
+        self.log("val/bleu4_iou25", bleu4_iou25, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("val/cider_iou25", cider_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/rouge_iou25", rouge_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/meteor_iou25", meteor_iou25, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/bleu4_iou50", bleu4_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/rouge_iou25", rouge_iou25, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/meteor_iou25", meteor_iou25, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/bleu4_iou50", bleu4_iou50, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
         self.log("val/cider_iou50", cider_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/rouge_iou50", rouge_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/meteor_iou50", meteor_iou50, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/rouge_iou50", rouge_iou50, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/meteor_iou50", meteor_iou50, prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+
+        self.correct_guesses_val = [0, 0]
+        self.iou25_val = [0, 0]
+        self.iou50_val = [0, 0]
         self.corpus_iou25 = {}
         self.candidates_iou25 = {}
         self.corpus_iou50 = {}
         self.candidates_iou50 = {}
-        # pass
-        #     self.log("val_eval/AP", inst_seg_eval_result["all_ap"], sync_dist=True)
-        #     self.log("val_eval/AP 50%", inst_seg_eval_result['all_ap_50%'], sync_dist=True)
-        #     self.log("val_eval/AP 25%", inst_seg_eval_result["all_ap_25%"], sync_dist=True)
-        #     self.log("val_eval/BBox AP 25%", obj_detect_eval_result["all_bbox_ap_0.25"]["avg"], sync_dist=True)
-        #     self.log("val_eval/BBox AP 50%", obj_detect_eval_result["all_bbox_ap_0.5"]["avg"], sync_dist=True)
 
     def test_step(self, data_dict, idx):
         # prepare input and forward

@@ -13,17 +13,17 @@ class JointDataset(Dataset):
         self.split = split
         # self.max_num_point = cfg.data.max_num_point
         self.instance_size = cfg.data.instance_size
-        self.augs_per_scene = 5
+        self.augs_per_scene = 4
+        self.num_descrs = 12
         self._load_from_disk()
 
     def _load_from_disk(self):
         split_folder = os.path.join(self.cfg.data.dataset_path, self.split)
         scan_ids = os.listdir(split_folder)
         self.scans = []
-        self.scans_idx = []
         self.descrs = []
+        self.scan_and_descr_idx = []
         
-        curr_scan = 0
         for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
             if scan_id == "_ignore":
                 continue
@@ -31,29 +31,31 @@ class JointDataset(Dataset):
             scan_fns = os.listdir(scan_folder)
             num_augs = 0
             for scan_fn in scan_fns:
-                if scan_fn == "descr" or num_augs >= self.augs_per_scene:
+                if scan_fn == "descr":
                     continue
+                if num_augs >= self.augs_per_scene:
+                    break
                 num_augs += 1
                 scan_file = os.path.join(scan_folder, f"{scan_fn}")
                 self.scans.append(torch.load(scan_file))
-            descr_folder = os.path.join(scan_folder, "descr")
-            descr_fns = os.listdir(descr_folder)
-            for descr_fn in descr_fns:
-                descr_file = os.path.join(descr_folder, descr_fn)
-                self.descrs.append(torch.load(descr_file))
-                self.scans_idx.append((curr_scan, curr_scan + num_augs)) # Mapping: idx -> scan
-            curr_scan += num_augs
+
+                descr_folder = os.path.join(scan_folder, "descr")
+                descr_fns = os.listdir(descr_folder)
+                num_descrs = min(self.num_descrs, len(descr_fns))
+                selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
+                for i in selected_idx:
+                    descr_fn = descr_fns[i]
+                    descr_file = os.path.join(descr_folder, descr_fn)
+                    self.descrs.append(torch.load(descr_file))
+                    self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
 
     def __len__(self):
-        return len(self.scans_idx)
+        return len(self.scan_and_descr_idx)
    
     
     def __getitem__(self, idx):
-        scan_id_range = self.scans_idx[idx]
-
-        scan = self.scans[random.randint(scan_id_range[0], scan_id_range[1]-1)]
-        descr = self.descrs[idx]
-        # print("Loaded scan", scan["aug_id"], "for description", descr["scan_desc_id"])
+        scan = self.scans[self.scan_and_descr_idx[idx][0]]
+        descr = self.descrs[self.scan_and_descr_idx[idx][1]]
 
         # Calculate best proposals
         best_proposals = []
