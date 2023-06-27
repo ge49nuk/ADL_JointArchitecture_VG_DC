@@ -17,11 +17,11 @@ class GeneralDataset(Dataset):
         self.cfg = cfg
         self.split = split
         self.max_num_point = cfg.data.max_num_point
-        self._load_from_disk()
         
         self.num_desc = 16  
-        self.augs_per_scene = 4
+        self.augs_per_scene = 10
         self.aug_memory = {}
+        self._load_from_disk()
 
     def _load_from_disk(self):
         with open(getattr(self.cfg.data.metadata, f"{self.split}_list")) as f:
@@ -33,7 +33,7 @@ class GeneralDataset(Dataset):
             scene_info["xyz"] -= scene_info["xyz"].mean(axis=0)
             scene_info["rgb"] = scene_info["rgb"].astype(np.float32) / 127.5 - 1
             scene_info["scene_id"] = scene_name
-            for i in range(min(self.num_desc, scene_info['num_descr'])): # scene_info['num_descr']
+            for i in range(scene_info['num_descr']): # scene_info['num_descr']
                 scene = scene_info.copy()
                 scene_path = os.path.join(self.cfg.data.dataset_path, self.split, f"{scene_name}_{i}.pth")
                 scene_descr = torch.load(scene_path)
