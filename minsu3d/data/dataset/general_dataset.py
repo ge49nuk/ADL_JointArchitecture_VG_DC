@@ -17,8 +17,7 @@ class GeneralDataset(Dataset):
         self.cfg = cfg
         self.split = split
         self.max_num_point = cfg.data.max_num_point
-        
-        self.num_desc = 16  
+         
         self.augs_per_scene = 10
         self.aug_memory = {}
         self._load_from_disk()
@@ -100,10 +99,10 @@ class GeneralDataset(Dataset):
         # Saving augmented scenes
         aug_matrix = self._get_augmentation_matrix()
         if scene_id not in self.aug_memory:
-            self.aug_memory[scene_id] = [1,0] # times_seen,aug_id 
+            self.aug_memory[scene_id] = [1, 0] # times_seen, aug_id 
         else:
             entry = self.aug_memory[scene_id]
-            if entry[0] > (self.num_desc / self.augs_per_scene) and entry[1] < self.augs_per_scene-1: 
+            if entry[1] < self.augs_per_scene-1: 
                 self.aug_memory[scene_id] = [1, entry[1]+1]
             else:
                 self.aug_memory[scene_id] = [entry[0]+1, entry[1]]
@@ -122,6 +121,7 @@ class GeneralDataset(Dataset):
         descr_tokens = descr_dict["tokens"]   
         num_descr_tokens = descr_dict["num_tokens"] 
         object_name = descr_dict["object_name"]
+        object_id = descr_dict["obj_id"] # Original obj id
         queried_obj = descr_dict["object_id"]
         
 
@@ -208,6 +208,7 @@ class GeneralDataset(Dataset):
         data["descr_tokens"] = descr_tokens
         data["num_descr_tokens"] = num_descr_tokens
         data["object_name"] = object_name
+        data["object_id"] = object_id
         data["descr_id"] = descr_id
         data["queried_obj"] = queried_obj
 

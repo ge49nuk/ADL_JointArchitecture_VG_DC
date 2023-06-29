@@ -92,6 +92,7 @@ def read_descr_file(desc_file, agg_file, iou_0_set, scan):
                 if 'floor' in group['label'] or 'wall' in group['label']:
                     ignored_obj += 1
             instance["object_id"] = [int(obj_id) - ignored_obj]
+            instance["obj_id"] = obj_id # Original obj id
             if scan + str(instance["object_id"][0]) in iou_0_set:
                 continue
         for ann_id in scan_data[obj_id]:

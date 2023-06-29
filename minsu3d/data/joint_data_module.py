@@ -83,6 +83,10 @@ def _collate_fn(batch):
     instance_ids = []
     scan_desc_id = []
 
+    scene_ids = []
+    object_ids = []
+    object_names = []
+
     for b in batch:
         point_features = b["point_features"]
         insts = np.split(point_features, b["instance_splits"], axis=0) # (#instances, #pts, dim_pt_feats)
@@ -96,12 +100,17 @@ def _collate_fn(batch):
         target_word_ids.append(torch.from_numpy(b["target_word_ids"]))
         num_tokens.append(b["num_tokens"])
         target_classes.append(torch.from_numpy(b["target_class"]))
+        ious_on_cluster.append(b["ious_on_cluster"])
         
         queried_objs.append(b["queried_objs"])
         proposals_idx.append(torch.from_numpy(b["proposals_idx"]))
         instance_ids.append(torch.from_numpy(b["instance_ids"]))
         scan_desc_id.append(b["scan_desc_id"])
-        ious_on_cluster.append(b["ious_on_cluster"])
+
+        scene_ids.append(b["scene_id"])
+        object_ids.append(b["object_id"])
+        object_names.append(b["object_name"])
+        
     
     data = {'instances': torch.cat(instances, dim=0)}
     data['scene_splits'] = scene_splits # need to extract [1:-1]
@@ -117,5 +126,9 @@ def _collate_fn(batch):
     data['proposals_idx'] = proposals_idx
     data['instance_ids'] = instance_ids
     data['scan_desc_id'] = scan_desc_id
+
+    data['scene_ids'] = scene_ids
+    data['object_ids'] = object_ids
+    data['object_names'] = object_names
 
     return data

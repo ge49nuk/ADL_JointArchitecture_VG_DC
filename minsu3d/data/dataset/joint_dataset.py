@@ -13,8 +13,8 @@ class JointDataset(Dataset):
         self.split = split
         # self.max_num_point = cfg.data.max_num_point
         self.instance_size = cfg.data.instance_size
-        self.augs_per_scene = 4
-        self.num_descrs = 12
+        self.augs_per_scene = 1
+        self.num_descrs = 4
         self._load_from_disk()
 
     def _load_from_disk(self):
@@ -42,8 +42,9 @@ class JointDataset(Dataset):
                 descr_folder = os.path.join(scan_folder, "descr")
                 descr_fns = os.listdir(descr_folder)
                 num_descrs = min(self.num_descrs, len(descr_fns))
-                selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
-                for i in selected_idx:
+                # selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
+                # for i in selected_idx:
+                for i in range(num_descrs):
                     descr_fn = descr_fns[i]
                     descr_file = os.path.join(descr_folder, descr_fn)
                     self.descrs.append(torch.load(descr_file))
@@ -81,5 +82,10 @@ class JointDataset(Dataset):
         data["queried_objs"] = np.array(descr['queried_objs'])
         data["instance_ids"] = scan['instance_ids']
         data["scan_desc_id"] = descr['scan_desc_id']
+
+        # For corpus generation
+        data["scene_id"] = descr['scene_id']
+        data["object_id"] = descr['object_id']
+        data["object_name"] = descr['object_name']
 
         return data

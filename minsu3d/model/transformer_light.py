@@ -117,7 +117,6 @@ class Transformer_Light(nn.Module):
         CLS_loss = 0.0
         DC_loss = 0.0
         candidate_descr_list = []
-        gt_descr_list = []
         for i, scene in enumerate(scenes):
             num_proposals = num_instances[i]
             len_text_tokens = num_tokens[i] - 1
@@ -170,15 +169,12 @@ class Transformer_Light(nn.Module):
                 assert DC_scores.size() == (len_text_tokens, self.size_vocab)
                 # For calculating DC scores
                 predicted_ids = DC_scores.argmax(dim=-1)
-                predicted_words = tokenizer.convert_ids_to_tokens(predicted_ids)[:-1] # Discard [SEP]
-                predicted_str = " ".join(predicted_words)
+                predicted_words = tokenizer.convert_ids_to_tokens(predicted_ids)
+                predicted_str = tokenizer.convert_tokens_to_string(predicted_words)
+                predicted_str = predicted_str.replace('[SEP]', '.')
+                predicted_str = predicted_str.replace(' \' s ', ' \'s ')
                 candidate_descr = "sos " + predicted_str + " eos"
                 candidate_descr_list.append(candidate_descr)
-                gt_wd_ids = target_word_ids[i][1:len_text_tokens] # Discard [CLS] [SEP]
-                gt_words = tokenizer.convert_ids_to_tokens(gt_wd_ids)
-                gt_str = " ".join(gt_words)
-                gt_descr = "sos " + gt_str + " eos"
-                gt_descr_list.append(gt_descr)
                 # Compute DC loss
                 DC_loss += self.loss_criterion_DC(DC_scores, target_word_ids[i][1:(len_text_tokens+1)])
         
@@ -189,7 +185,7 @@ class Transformer_Light(nn.Module):
         return {"Match_scores": Match_scores_list, "Match_loss": Match_loss,
                 "CLS_scores": CLS_scores_list, "CLS_loss": CLS_loss,
                 "DC_scores": DC_scores_list, "DC_loss": DC_loss,
-                "candidate_descrs": candidate_descr_list, "gt_descrs": gt_descr_list}
+                "candidate_descrs": candidate_descr_list}
     
 
     def inferrence_DC(self, data_dict):

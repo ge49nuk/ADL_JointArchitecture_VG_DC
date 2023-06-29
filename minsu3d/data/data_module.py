@@ -59,6 +59,7 @@ def _sparse_collate_fn(batch):
     descr_tokens = []
     num_descr_tokens = []
     object_names = []
+    object_ids = []
     descr_ids = []
     queried_objs = []
     aug_ids = []
@@ -90,6 +91,7 @@ def _sparse_collate_fn(batch):
         descr_tokens.append(torch.tensor(b["descr_tokens"]))
         num_descr_tokens.append(b["num_descr_tokens"])
         object_names.append(b["object_name"])
+        object_ids.append(b["object_id"])
         descr_ids.append(b["descr_id"])
 
         queried_objs.append(b["queried_obj"])
@@ -109,6 +111,7 @@ def _sparse_collate_fn(batch):
     data["descr_tokens"] = torch.stack(descr_tokens)
     data["num_descr_tokens"] = num_descr_tokens
     data["object_names"] = object_names
+    data["object_ids"] = object_ids
     data["descr_ids"] = descr_ids
     data["queried_objs"] = queried_objs
     data["num_instance"] = total_num_inst
