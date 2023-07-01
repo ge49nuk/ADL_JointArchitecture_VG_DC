@@ -76,35 +76,12 @@ def write_ply(verts, colors, indices, output_file):
     file.write('end_header\n')
     for vert, color in zip(verts, colors):
         file.write('{:f} {:f} {:f} {:d} {:d} {:d}\n'.format(vert[0], vert[1], vert[2],
-                                                            int(color[0] * 255),
-                                                            int(color[1] * 255),
-                                                            int(color[2] * 255)))
+                                                            int(color[0]),
+                                                            int(color[1]),
+                                                            int(color[2])))
     for ind in indices:
         file.write('3 {:d} {:d} {:d}\n'.format(ind[0], ind[1], ind[2]))
     file.close()
-
-def get_bbox(predicted_mask, points):
-    x_min = None
-    y_min = None
-    z_min = None
-    x_max = None
-    y_max = None
-    z_max = None
-    for vertexIndex, xyz in enumerate(points):
-        if predicted_mask[vertexIndex] == True:
-            if x_min is None or xyz[0] < x_min:
-                x_min = xyz[0]
-            if y_min is None or xyz[1] < y_min:
-                y_min = xyz[1]
-            if z_min is None or xyz[2] < z_min:
-                z_min = xyz[2]
-            if x_max is None or xyz[0] > x_max:
-                x_max = xyz[0]
-            if y_max is None or xyz[1] > y_max:
-                y_max = xyz[1]
-            if z_max is None or xyz[2] > z_max:
-                z_max = xyz[2]
-    return x_min, x_max, y_min, y_max, z_min, z_max
 
 
 def get_random_color():
@@ -118,20 +95,80 @@ def get_random_rgb_colors(num):
     rgb_colors = [get_random_color() for _ in range(num)]
     return rgb_colors
 
+def corners_from_minmax(x, y, z):
+    pts = []
+    for xi in x:
+        for yi in y:
+            for zi in z:
+                pts.append([xi,yi,zi])
+    return np.array(pts)
+
+def hollow_bbox(coords):
+    cmin = coords[0:3]
+    cmax = coords[3:]
+    dims = np.array(cmax) - np.array(cmin)
+    edges = []
+    for i in range(3):
+        edge = np.array(cmin + cmin)
+        edge[:3] -= 0.03
+        edge[3:5] += 0.03
+        edge[i+3] = cmax[i]
+        
+        dims_to_move = [0,1,2]
+        dims_to_move.remove(i)
+        for dist1 in (0,dims[dims_to_move[0]]):
+            for dist2 in (0,dims[dims_to_move[1]]):
+                edge_new = edge.copy()
+                move_dir = np.zeros(3)
+                move_dir[dims_to_move[0]] += dist1
+                move_dir[dims_to_move[1]] += dist2
+                move_dir = np.tile(move_dir, 2)
+                edge_new += move_dir
+                edges.append(edge_new)
+    return edges
+
 
 def generate_colored_ply(args, points, colors, indices,
-                         rgb_inst_ply, pred_verts, gt_verts):
-    if args.mode == "instance":
+                         rgb_inst_ply, pred_verts, gt_verts,
+                         pred_bboxes, gt_bboxes):
+
+    if not args.bbox:
         unique_gt_verts = np.unique(np.array(gt_verts).flatten())
         for i, query in enumerate(gt_verts):
             for vertexIndex in gt_verts[i]:
-                colors[vertexIndex] = [255,255,1] # GT
+                colors[vertexIndex] = [0,0,255] # GT
         for i, query in enumerate(pred_verts):
             for vertexIndex in pred_verts[i]:
                 if vertexIndex in unique_gt_verts:
-                    colors[vertexIndex] = [255,1,255] # GT interesects with pred
+                    colors[vertexIndex] = [0,255,0] # GT interesects with pred
                 else:
-                    colors[vertexIndex] = [1,255,255] # pred
+                    colors[vertexIndex] = [255,0,0] # pred
+        
+        #TODO  visualize bboxes
+    else:
+        for bbox in pred_bboxes:
+            for edge in hollow_bbox(bbox):
+                corner_pts = corners_from_minmax((edge[0],edge[3]), (edge[1],edge[4]), (edge[2],edge[5]))
+                corner_pts = o3d.utility.Vector3dVector(corner_pts)
+                box = o3d.geometry.OrientedBoundingBox.create_from_points(corner_pts)
+                bbox_mesh = o3d.geometry.TriangleMesh.create_from_oriented_bounding_box(box)
+                global_triangles = np.asarray(bbox_mesh.triangles) + np.full((3),points.shape[0])
+                points = np.append(points, np.asarray(bbox_mesh.vertices), axis=0)
+                colors = np.append(colors, np.full((8,3), [0,0,255]), axis=0)
+                indices = np.append(indices, global_triangles, axis=0)
+        for bbox in gt_bboxes:
+            for edge in hollow_bbox(bbox):
+                corner_pts = corners_from_minmax((edge[0],edge[3]), (edge[1],edge[4]), (edge[2],edge[5]))
+                corner_pts = o3d.utility.Vector3dVector(corner_pts)
+                box = o3d.geometry.OrientedBoundingBox.create_from_points(corner_pts)
+                bbox_mesh = o3d.geometry.TriangleMesh.create_from_oriented_bounding_box(box)
+                global_triangles = np.asarray(bbox_mesh.triangles) + np.full((3),points.shape[0])
+                points = np.append(points, np.asarray(bbox_mesh.vertices), axis=0)
+                colors = np.append(colors, np.full((8,3), [0,255,0]), axis=0)
+                indices = np.append(indices, global_triangles, axis=0)
+            
+
+    
 
     write_ply(points, colors, indices, rgb_inst_ply)
     return 0
@@ -196,22 +233,30 @@ def generate_single_ply(args):
     indices = np.asarray(scannet_data.triangles)
     colors = colors * 255.0
 
-    
+    #TODO: read bboxes and pass them
     with open(inst_info_file) as file:
         data = file.readlines()
         data = [line.rstrip() for line in data]
-    num_queried_obj = int(len(data)/2)
     pred_verts = []
     gt_verts = []
-    for i in range(num_queried_obj):
-        verts = data[i].split()
-        pred_verts.append([int(val) for val in verts])
-        verts = data[i+num_queried_obj].split()
-        gt_verts.append([int(val) for val in verts])
+    pred_bboxes = []
+    gt_bboxes = []
+    # data = [pred_verts, gt_verts, pred_bboxes, val_bboxes]
+    verts = data[0].split()
+    pred_verts.append([int(val) for val in verts])
+    verts = data[1].split()
+    gt_verts.append([int(val) for val in verts])
+    coords = data[2].split(",") # xmin ymin zmin xmax ymax zmax,xmin ymin zmin... 
+    for coord in coords:
+        coord = [float(val) for val in coord.split()]
+        pred_bboxes.append(coord)
+    coords = data[3].split(",") # xmin ymin zmin xmax ymax zmax,xmin ymin zmin... 
+    for coord in coords:
+        coord = [float(val) for val in coord.split()]
+        gt_bboxes.append(coord)
 
-    if not args.bbox:
-        generate_colored_ply(args, points, colors, indices,
-                             rgb_inst_ply, pred_verts, gt_verts)
+    generate_colored_ply(args, points, colors, indices,
+                             rgb_inst_ply, pred_verts, gt_verts, pred_bboxes, gt_bboxes)
 
 
 def generate_pred_inst_ply(args):
@@ -221,7 +266,7 @@ def generate_pred_inst_ply(args):
 
     full_ids = [full_id.rstrip() for full_id in open(ids_file)]
     for id in tqdm(full_ids):
-        scene_id, _ = id.split(":")
+        scene_id, _ = id.split("::")
         args.scene_id = scene_id
         args.full_id = id
         

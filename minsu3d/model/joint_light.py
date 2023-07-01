@@ -7,8 +7,10 @@ import os
 import sys
 import json
 import pytorch_lightning as pl
+from transformers import BertTokenizer
 from minsu3d.model.transformer_light import Transformer_Light
 from minsu3d.util.io import save_prediction_joint_arch
+from minsu3d.util.eval_utils import get_scene_info, calculate_iou, get_bbox
 from minsu3d.capeval.eval_helper import eval_cap
 
 
@@ -24,6 +26,7 @@ class Joint_Light(pl.LightningModule):
         self.correct_guesses_val = [0,0]
         self.iou25_val = [0,0]
         self.iou50_val = [0,0]
+        self.bbox_iou_test = [0,0,0]
 
         self.candidates_iou25 = {}
         self.candidates_iou50 = {}
@@ -153,24 +156,18 @@ class Joint_Light(pl.LightningModule):
 
 
     def on_train_epoch_end(self):
-        # train_acc = 0.0
-        # if not self.correct_guesses_train[1] == 0:
-        train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
-        self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        if self.correct_guesses_train[1] != 0:
+            train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
+            self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.correct_guesses_train = [0,0]
     
     def on_validation_epoch_end(self):
-        # val_acc = 0.0
-        # iou25 = 0.0
-        # iou50 = 0.0
-        # if not self.correct_guesses_val[1] == 0.0:
-        val_acc = self.correct_guesses_val[0]/self.correct_guesses_val[1]
-        # if not self.iou25_val[1] == 0:
-        iou25 = self.iou25_val[0]/self.iou25_val[1]
-        # if not self.iou50_val[1] == 0:
-        iou50 = self.iou50_val[0]/self.iou50_val[1]
-        self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
+        if not self.correct_guesses_val[1] == 0.0:
+            val_acc = self.correct_guesses_val[0]/self.correct_guesses_val[1]
+            iou25 = self.iou25_val[0]/self.iou25_val[1]
+            iou50 = self.iou50_val[0]/self.iou50_val[1]
+            self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+            print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
         
         bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
 
@@ -211,7 +208,8 @@ class Joint_Light(pl.LightningModule):
 
     def test_step(self, data_dict, idx):
         # prepare input and forward
-        output_dict = self(data_dict)
+        output_dict = self(data_dict)        
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         
         batch_size = len(data_dict['scan_desc_id'])
         for i in range(batch_size):
@@ -236,19 +234,45 @@ class Joint_Light(pl.LightningModule):
                 GT_verts_arr.append([tensor.item() for tensor in GT_verts])
             
             scan_desc_id = data_dict["scan_desc_id"][i]
+            scan_id, _ = scan_desc_id.split("::")
+
+            #Calculate bbox iou
+            points, colors, indices = get_scene_info(self.hparams.cfg.data.scans_path, scan_id)
+
+            bboxes_pred = [get_bbox(verts, points) for verts in predicted_verts_arr]
+            bboxes_gt = [get_bbox(verts, points) for verts in GT_verts_arr]
+            iou = calculate_iou(bboxes_pred[0], bboxes_gt[0])
+                
+            self.bbox_iou_test[2] += 1.
+            if iou >= 0.25:
+                self.bbox_iou_test[0] += 1.
+                if iou >= 0.5:
+                    self.bbox_iou_test[1] += 1.
+
+            gt_descr = tokenizer.decode(data_dict["target_word_ids"][i][1:data_dict['num_tokens'][i]-1])
+            # out = self.transformer.inferrence_DC(data_dict)
+            # print(out["Captions"][0])
 
             self.val_test_step_outputs.append(
-                (predicted_verts_arr, GT_verts_arr, scan_desc_id)
+                (predicted_verts_arr, GT_verts_arr, scan_desc_id, gt_descr, bboxes_pred, bboxes_gt)
             )
 
     def on_test_epoch_end(self):
+        print("bbox IOU25:", self.bbox_iou_test[0]/self.bbox_iou_test[2])
+        print("bbox IOU50:", self.bbox_iou_test[1]/self.bbox_iou_test[2])
         all_pred_verts = []
         all_gt_verts = []
         all_scan_desc_ids = []
-        for predicted_verts, gt_verts, scan_desc_id in self.val_test_step_outputs:
+        all_desc = []
+        all_bboxes_gt = []
+        all_bboxes_pred = []
+        for predicted_verts, gt_verts, scan_desc_id, gt_descr, bboxes_pred, bboxes_gt in self.val_test_step_outputs:
             all_pred_verts.append(predicted_verts)
             all_gt_verts.append(gt_verts)
             all_scan_desc_ids.append(scan_desc_id)
+            all_desc.append(gt_descr)
+            all_bboxes_pred.append(bboxes_pred)
+            all_bboxes_gt.append(bboxes_gt)
 
         self.val_test_step_outputs.clear()
         if self.hparams.cfg.model.inference.save_predictions:
@@ -257,6 +281,6 @@ class Joint_Light(pl.LightningModule):
                 'predictions'
             )
             save_prediction_joint_arch(
-                save_dir, all_pred_verts, all_gt_verts, all_scan_desc_ids
+                save_dir, all_pred_verts, all_gt_verts, all_scan_desc_ids, all_desc, all_bboxes_pred, all_bboxes_gt
             )
             self.print(f"\nPredictions saved at {os.path.abspath(save_dir)}")

@@ -4,6 +4,8 @@ dataset_root_path: ${project_root_path}/data
 dataset: JointDataset
 dataset_path: ${data.dataset_root_path}/joint_data
 scanrefer_path: ${data.dataset_root_path}/scanrefer
+scans_path: ${data.dataset_root_path}/scannetv2/scans
+
 
 batch_size: 4
 num_workers: 4

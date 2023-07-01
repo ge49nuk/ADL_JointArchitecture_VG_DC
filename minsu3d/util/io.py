@@ -35,28 +35,51 @@ def save_prediction(save_path, all_pred_insts, mapping_ids, ignored_classes_indi
             f.write("\n".join(tmp_info))
     
 
-def save_prediction_joint_arch(save_path, predicted_verts, gt_verts, scan_desc_ids):
+def save_prediction_joint_arch(save_path, predicted_verts, gt_verts, scan_desc_ids, descriptions, bboxes_pred, bboxes_gt):
     inst_pred_path = os.path.join(save_path, "instance")
+    num_descriptions = len(scan_desc_ids)
     # JOINT_ARCH
     scenes_str = ""
-    for i in range(len(scan_desc_ids)): # batch
+    descriptions_str = ""
+    for i in range(num_descriptions):
+        num_queried = len(predicted_verts[i])
         id = scan_desc_ids[i]
         pred_verts_txt = ""
         gt_verts_txt = ""
-        for j in range(len(predicted_verts[i])): # number of queried objects
+        bboxes_pred_txt = ""
+        bboxes_gt_txt = ""
+        # TODO: save bboxes in good format
+        for j in range(num_queried): # number of queried objects
             for vert in predicted_verts[i][j]: # number of verts
                 pred_verts_txt += str(vert)+" "
-        for j in range(len(gt_verts[i])):
+            minxyz, maxxyz = bboxes_pred[i][j]
+            minmaxxyz =  minxyz + maxxyz
+            for val in minmaxxyz:
+                bboxes_pred_txt += ("{:.4f}".format(val)) + " "
+            if j < num_queried - 1:
+                bboxes_pred_txt += ","
+        for j in range(num_queried):
             for vert in gt_verts[i][j]:
                 gt_verts_txt += str(vert)+" "
+            minxyz, maxxyz = bboxes_gt[i][j]
+            minmaxxyz =  minxyz + maxxyz
+            for val in minmaxxyz:
+                bboxes_gt_txt += ("{:.4f}".format(val)) + " "
+            if j < num_queried - 1:
+                bboxes_gt_txt += ","
+        
+
 
         with open(os.path.join(inst_pred_path, f"{id}.txt"), "w") as f:
-                f.write(pred_verts_txt +"\n"+ gt_verts_txt)
+                f.write(pred_verts_txt +"\n"+ gt_verts_txt +"\n"+ bboxes_pred_txt + "\n" + bboxes_gt_txt)
 
         scenes_str += id + "\n"
+        descriptions_str += id + " " + descriptions[i]+"\n"
 
     with open(os.path.join(inst_pred_path, "scenes.txt"), "w") as f:
                 f.write(scenes_str)
+    with open(os.path.join(inst_pred_path, "descriptions.txt"), "w") as f:
+            f.write(descriptions_str)
 
 
 
