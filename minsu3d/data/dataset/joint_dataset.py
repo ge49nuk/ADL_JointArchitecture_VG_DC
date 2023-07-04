@@ -13,8 +13,8 @@ class JointDataset(Dataset):
         self.split = split
         # self.max_num_point = cfg.data.max_num_point
         self.instance_size = cfg.data.instance_size
-        self.augs_per_scene = 1
-        self.num_descrs = 4
+        self.augs_per_scene = 4 # For train set
+        self.num_descrs = 12 # For train set
         self._load_from_disk()
 
     def _load_from_disk(self):
@@ -23,32 +23,53 @@ class JointDataset(Dataset):
         self.scans = []
         self.descrs = []
         self.scan_and_descr_idx = []
-        
-        for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
-            if scan_id == "_ignore":
-                continue
-            scan_folder = os.path.join(split_folder, scan_id)
-            scan_fns = os.listdir(scan_folder)
-            num_augs = 0
-            for scan_fn in scan_fns:
-                if scan_fn == "descr":
-                    continue
-                if num_augs >= self.augs_per_scene:
-                    break
-                num_augs += 1
-                scan_file = os.path.join(scan_folder, f"{scan_fn}")
-                self.scans.append(torch.load(scan_file))
 
-                descr_folder = os.path.join(scan_folder, "descr")
-                descr_fns = os.listdir(descr_folder)
-                num_descrs = min(self.num_descrs, len(descr_fns))
-                # selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
-                # for i in selected_idx:
-                for i in range(num_descrs):
-                    descr_fn = descr_fns[i]
-                    descr_file = os.path.join(descr_folder, descr_fn)
-                    self.descrs.append(torch.load(descr_file))
-                    self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
+        if self.split == 'train':
+            for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
+                if scan_id == "_ignore":
+                    continue
+                scan_folder = os.path.join(split_folder, scan_id)
+                scan_fns = os.listdir(scan_folder)
+                num_augs = 0
+                for scan_fn in scan_fns:
+                    if scan_fn == "descr":
+                        continue
+                    if num_augs >= self.augs_per_scene:
+                        break
+                    num_augs += 1
+                    scan_file = os.path.join(scan_folder, f"{scan_fn}")
+                    self.scans.append(torch.load(scan_file))
+
+                    descr_folder = os.path.join(scan_folder, "descr")
+                    descr_fns = os.listdir(descr_folder)
+                    num_descrs = min(self.num_descrs, len(descr_fns))
+                    # selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
+                    # for i in selected_idx:
+                    for i in range(num_descrs):
+                        descr_fn = descr_fns[i]
+                        descr_file = os.path.join(descr_folder, descr_fn)
+                        self.descrs.append(torch.load(descr_file))
+                        self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
+        
+        else: # Val split
+            for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
+                if scan_id == "_ignore":
+                    continue
+                scan_folder = os.path.join(split_folder, scan_id)
+                scan_fns = os.listdir(scan_folder)
+                for scan_fn in scan_fns:
+                    if scan_fn == "descr":
+                        continue
+                    scan_file = os.path.join(scan_folder, f"{scan_fn}")
+                    self.scans.append(torch.load(scan_file))
+                    descr_folder = os.path.join(scan_folder, "descr")
+                    descr_fns = os.listdir(descr_folder)
+                    for descr_fn in descr_fns:
+                        descr_file = os.path.join(descr_folder, descr_fn)
+                        self.descrs.append(torch.load(descr_file))
+                        self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
+                    break # Load only one scene
+
 
     def __len__(self):
         return len(self.scan_and_descr_idx)

@@ -10,7 +10,7 @@ max_num_point: 1000000
 
 augmentation:
   jitter_xyz: True
-  flip: True
+  flip: False
   rotation: True
   elastic: False
   jitter_rgb: True
