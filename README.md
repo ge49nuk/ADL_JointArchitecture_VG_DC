@@ -1,5 +1,6 @@
-# MINSU3D
-MINSU3D：**Min**kowskiEngine-powered **S**cene **U**nderstanding in **3D** contains reimplementation of state-of-the-art 3D scene understanding methods on point clouds powered by [MinkowskiEngine](https://github.com/NVIDIA/MinkowskiEngine).  
+# Joint Architecture for VG and DC
+This repository is implementing a transformer that learns a joint representation of 3D objects and text descriptions in order to solve the tasks of visual grounding (VG) and dense captioning (DC).
+The base for this project is [Minsu3d](https://github.com/3dlg-hcvc/minsu3d)).  
 
 <a href="https://pytorch.org/"><img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white"></a>
 <a href="https://pytorchlightning.ai/"><img alt="Lightning" src="https://img.shields.io/badge/Lightning-792DE4?style=for-the-badge&logo=pytorch-lightning&logoColor=white"></a>
