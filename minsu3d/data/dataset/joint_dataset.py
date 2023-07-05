@@ -66,6 +66,8 @@ class JointDataset(Dataset):
             descr_folder = os.path.join(scan_folder, "descr")
             descr_fns = os.listdir(descr_folder)
             num_descrs = min(self.cfg.model.num_descriptions, len(descr_fns))
+            if self.split == "val":
+                num_descrs = len(descr_fns)
             for i in range(num_descrs):
                 descr_file = os.path.join(descr_folder, descr_fns[i])
                 self.descrs.append(torch.load(descr_file))
