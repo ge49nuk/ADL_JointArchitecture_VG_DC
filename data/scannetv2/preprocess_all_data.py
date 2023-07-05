@@ -101,7 +101,7 @@ def read_descr_file(desc_file, agg_file, iou_0_set, scan, split):
             instance_cpy["object_name"] = scan_data[obj_id][ann_id]["object_name"]
             descr = "[CLS] " + scan_data[obj_id][ann_id]["description"]
             descr = descr.replace('.',' [SEP]')
-            if descr in seen_desc:
+            if descr in seen_desc and split == "train":
                 inst_descr[seen_desc[descr]]["object_id"].append(instance["object_id"][0])
                 continue
             tokenized_descr = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))

@@ -18,7 +18,7 @@ class GeneralDataset(Dataset):
         self.split = split
         self.max_num_point = cfg.data.max_num_point
          
-        self.augs_per_scene = 10
+        self.augs_per_scene = 6
         self.aug_memory = {}
         self._load_from_disk()
 
@@ -99,15 +99,13 @@ class GeneralDataset(Dataset):
         # Saving augmented scenes
         aug_matrix = self._get_augmentation_matrix()
         if scene_id not in self.aug_memory:
-            self.aug_memory[scene_id] = [1, 0] # times_seen, aug_id 
+            self.aug_memory[scene_id] = 0 # times_seen, aug_id 
         else:
-            entry = self.aug_memory[scene_id]
-            if entry[1] < self.augs_per_scene-1: 
-                self.aug_memory[scene_id] = [1, entry[1]+1]
-            else:
-                self.aug_memory[scene_id] = [entry[0]+1, entry[1]]
+            augs_created = self.aug_memory[scene_id]
+            if augs_created < self.augs_per_scene-1 and self.split == "train": 
+                self.aug_memory[scene_id] = augs_created + 1
         
-        aug_scene_id = scene["scene_id"] + ":" + str(self.aug_memory[scene_id][1])
+        aug_scene_id = scene["scene_id"] + ":" + str(self.aug_memory[scene_id])
 
         descr_id = scene["descr_id"]
 
@@ -123,6 +121,7 @@ class GeneralDataset(Dataset):
         object_name = descr_dict["object_name"]
         object_id = descr_dict["obj_id"] # Original obj id
         queried_obj = descr_dict["object_id"]
+        ann_id = descr_dict["ann_id"]
         
 
         data = {"scan_id": scene_id}
@@ -211,6 +210,7 @@ class GeneralDataset(Dataset):
         data["object_id"] = object_id
         data["descr_id"] = descr_id
         data["queried_obj"] = queried_obj
+        data["ann_id"] = ann_id
 
         data["voxel_xyz"], data["voxel_features"], _, data["voxel_point_map"] = ME.utils.sparse_quantize(
             coordinates=point_xyz_elastic, features=point_features,

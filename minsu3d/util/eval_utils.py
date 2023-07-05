@@ -1,6 +1,7 @@
 import os
 import open3d as o3d
 import numpy as np
+import json
 
 
 def get_bbox(predicted_verts, points):
@@ -50,3 +51,93 @@ def calculate_iou(bbox1, bbox2):
     iou = intersection_volume / union_volume
 
     return iou
+
+
+def _get_raw2label(cfg):
+    type2class = type2class = {'cabinet':0, 'bed':1, 'chair':2, 'sofa':3, 'table':4, 'door':5,
+            'window':6,'bookshelf':7,'picture':8, 'counter':9, 'desk':10, 'curtain':11,
+            'refrigerator':12, 'shower curtain':13, 'toilet':14, 'sink':15, 'bathtub':16, 'others':17}  
+    # mapping
+    scannet_labels = type2class.keys()
+    scannet2label = {label: i for i, label in enumerate(scannet_labels)}
+
+    # data path
+    SCANNET_V2_TSV = os.path.join(cfg.data.dataset_root_path, "scannetv2/metadata/scannetv2-labels.combined.tsv")
+    lines = [line.rstrip() for line in open(SCANNET_V2_TSV)]
+    lines = lines[1:]
+    raw2label = {}
+    for i in range(len(lines)):
+        label_classes_set = set(scannet_labels)
+        elements = lines[i].split('\t')
+        raw_name = elements[1]
+        nyu40_name = elements[7]
+        if nyu40_name not in label_classes_set:
+            raw2label[raw_name] = scannet2label['others']
+        else:
+            raw2label[raw_name] = scannet2label[nyu40_name]
+    raw2label["shower_curtain"] = 13
+
+    return raw2label
+
+def _get_unique_multiple_lookup(cfg):
+    descr_file_path = os.path.join(cfg.data.scanrefer_path, 'ScanRefer_filtered_organized.json')
+    with open(descr_file_path, 'r') as json_data:
+        scanrefer = json.load(json_data)
+    raw2label = _get_raw2label(cfg)
+    all_sem_labels = {}
+    cache = {}
+    for s_id in scanrefer:
+        for o_id in scanrefer[s_id]:
+            for ann_id in scanrefer[s_id][o_id]:
+                data = scanrefer[s_id][o_id][ann_id]
+                scene_id = data["scene_id"]
+                object_id = data["object_id"]
+                object_name = " ".join(data["object_name"].split("_"))
+                ann_id = data["ann_id"]
+
+                if scene_id not in all_sem_labels:
+                    all_sem_labels[scene_id] = []
+
+                if scene_id not in cache:
+                    cache[scene_id] = {}
+
+                if object_id not in cache[scene_id]:
+                    cache[scene_id][object_id] = {}
+                    try:
+                        all_sem_labels[scene_id].append(raw2label[object_name])
+                    except KeyError:
+                        all_sem_labels[scene_id].append(17)
+
+    # convert to numpy array
+    all_sem_labels = {scene_id: np.array(all_sem_labels[scene_id]) for scene_id in all_sem_labels.keys()}
+
+    unique_multiple_lookup = {}
+    for s_id in scanrefer:
+        for o_id in scanrefer[s_id]:
+            for ann_id in scanrefer[s_id][o_id]:
+                data = scanrefer[s_id][o_id][ann_id]
+                scene_id = data["scene_id"]
+                object_id = data["object_id"]
+                object_name = " ".join(data["object_name"].split("_"))
+                ann_id = data["ann_id"]
+
+                try:
+                    sem_label = raw2label[object_name]
+                except KeyError:
+                    sem_label = 17
+
+                unique_multiple = 0 if (all_sem_labels[scene_id] == sem_label).sum() == 1 else 1
+
+                # store
+                if scene_id not in unique_multiple_lookup:
+                    unique_multiple_lookup[scene_id] = {}
+
+                if object_id not in unique_multiple_lookup[scene_id]:
+                    unique_multiple_lookup[scene_id][object_id] = {}
+
+                if ann_id not in unique_multiple_lookup[scene_id][object_id]:
+                    unique_multiple_lookup[scene_id][object_id][ann_id] = None
+
+                unique_multiple_lookup[scene_id][object_id][ann_id] = unique_multiple
+
+    return unique_multiple_lookup

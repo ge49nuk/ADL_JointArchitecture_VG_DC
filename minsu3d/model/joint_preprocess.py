@@ -44,6 +44,7 @@ class JointPreprocessModelT(pl.LightningModule):
         scan_id = data_dict["scan_ids"][0]
         object_id = data_dict["object_ids"][0]
         object_name = data_dict["object_names"][0]
+        ann_id = data_dict["ann_ids"][0]
         
         # SoftGroup
         self.softgroup.eval()
@@ -101,7 +102,7 @@ class JointPreprocessModelT(pl.LightningModule):
                         'ious_on_cluster': ious_on_cluster.cpu().numpy()}, scan_file)
             self.scan_list.append(aug_id)
         torch.save({'scene_id': scan_id, 'object_id': object_id, 'object_name': object_name, 'queried_objs': queried_objs, 'text_embedding': text_embedding.cpu().numpy(), 'target_word_ids': target_word_ids.cpu().numpy(), 
-                    'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(), 'scan_desc_id': scan_desc_id}, descr_file)
+                    'num_tokens': num_tokens, 'target_class': target_class.cpu().numpy(), 'scan_desc_id': scan_desc_id, 'ann_id' : ann_id}, descr_file)
         
         # with open(full_path, 'wb') as fp:
         #     pickle.dump(content, fp)

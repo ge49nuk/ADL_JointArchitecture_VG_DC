@@ -63,6 +63,7 @@ def _sparse_collate_fn(batch):
     descr_ids = []
     queried_objs = []
     aug_ids = []
+    ann_ids = []
 
     for i, b in enumerate(batch):
         scan_ids.append(b["scan_id"])
@@ -96,6 +97,7 @@ def _sparse_collate_fn(batch):
 
         queried_objs.append(b["queried_obj"])
         aug_ids.append(b["aug_id"])
+        ann_ids.append(b["ann_id"])
 
     data['scan_ids'] = scan_ids
     data["aug_ids"] = aug_ids
@@ -115,6 +117,7 @@ def _sparse_collate_fn(batch):
     data["descr_ids"] = descr_ids
     data["queried_objs"] = queried_objs
     data["num_instance"] = total_num_inst
+    data["ann_ids"] = ann_ids
 
     data["voxel_xyz"], data["voxel_features"] = ME.utils.sparse_collate(
         coords=voxel_xyz_list, feats=voxel_features_list

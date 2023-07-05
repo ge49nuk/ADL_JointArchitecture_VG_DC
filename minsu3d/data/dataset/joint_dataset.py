@@ -8,7 +8,6 @@ from torch.utils.data import Dataset
 
 class JointDataset(Dataset):
     def __init__(self, cfg, split):
-
         self.cfg = cfg
         self.split = split
         self.instance_size = cfg.data.instance_size
@@ -106,15 +105,17 @@ class JointDataset(Dataset):
         data["num_tokens"] = descr['num_tokens'] 
         data["target_class"] = descr['target_class']
         
-        # For testing
-        data["proposals_idx"] = scan['proposals_idx']
-        data["queried_objs"] = np.array(descr['queried_objs'])
-        data["instance_ids"] = scan['instance_ids']
-        data["scan_desc_id"] = descr['scan_desc_id']
+        if self.split == "val":
+            # For testing
+            data["proposals_idx"] = scan['proposals_idx']
+            data["queried_objs"] = np.array(descr['queried_objs'])
+            data["instance_ids"] = scan['instance_ids']
+            data["scan_desc_id"] = descr['scan_desc_id']
+            data["ann_id"] = descr['ann_id']
 
-        # For corpus generation
-        data["scene_id"] = descr['scene_id']
-        data["object_id"] = descr['object_id']
-        data["object_name"] = descr['object_name']
+            # For corpus generation
+            data["scene_id"] = descr['scene_id']
+            data["object_id"] = descr['object_id']
+            data["object_name"] = descr['object_name']
 
         return data

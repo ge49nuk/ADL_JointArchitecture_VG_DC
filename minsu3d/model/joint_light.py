@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 from transformers import BertTokenizer
 from minsu3d.model.transformer_light import Transformer_Light
 from minsu3d.util.io import save_prediction_joint_arch
-from minsu3d.util.eval_utils import get_scene_info, calculate_iou, get_bbox
+from minsu3d.util.eval_utils import get_scene_info, calculate_iou, get_bbox, _get_unique_multiple_lookup
 from minsu3d.capeval.eval_helper import eval_cap
 
 
@@ -23,15 +23,18 @@ class Joint_Light(pl.LightningModule):
         self.batch_size = cfg.data.batch_size
 
         self.correct_guesses_train = [0,0]
+
         self.correct_guesses_val = [0,0]
-        self.iou25_val = [0,0]
-        self.iou50_val = [0,0]
-        self.bbox_iou_test = [0,0,0]
+        self.iou_val = [0,0,0] # <- iou25 iou50 total
 
         self.candidates_iou25 = {}
         self.candidates_iou50 = {}
 
         self.epoch_count = 0
+
+        self.unique_multiple_lookup = _get_unique_multiple_lookup(self.hparams.cfg)
+        self.unique_iou = [0,0,0] # <- iou25 iou50 total
+        self.multiple_iou = [0,0,0] # <- iou25 iou50 total
         
     def configure_optimizers(self):
         optimizer = hydra.utils.instantiate(self.hparams.cfg.model.optimizer, params=filter(lambda p: p.requires_grad, self.parameters()), weight_decay=1e-4)
@@ -132,15 +135,14 @@ class Joint_Light(pl.LightningModule):
         
         if self.batch_size == batch_size: # check if we have a full batch, dont log if not
             self.correct_guesses_val[1] += self.batch_size
-            self.iou25_val[1] += self.batch_size
-            self.iou50_val[1] += self.batch_size
+            self.iou_val[2] += self.batch_size
             for bi in range(self.batch_size): 
                 guess = torch.argmax(output_dict["Match_scores"][bi])
                 if guess in best_proposals[bi]:
                     self.correct_guesses_val[0] += 1
                 for o in data_dict["queried_objs"][bi]:
                     if data_dict["ious_on_cluster"][bi][guess][o] >= 0.25:
-                        self.iou25_val[0] += 1
+                        self.iou_val[0] += 1
                         key = "{}|{}|{}".format(data_dict["scene_ids"][bi], data_dict["object_ids"][bi], data_dict["object_names"][bi])
                         candidate_descr = output_dict["candidate_descrs"][bi]
                         if key in self.candidates_iou25:
@@ -148,7 +150,7 @@ class Joint_Light(pl.LightningModule):
                         else:
                             self.candidates_iou25[key] = [candidate_descr]
                         if data_dict["ious_on_cluster"][bi][guess][o] >= 0.5:
-                            self.iou50_val[0] += 1
+                            self.iou_val[1] += 1
                             if key in self.candidates_iou50:
                                 self.candidates_iou50[key].append(candidate_descr)
                             else:
@@ -164,8 +166,8 @@ class Joint_Light(pl.LightningModule):
     def on_validation_epoch_end(self):
         if not self.correct_guesses_val[1] == 0.0:
             val_acc = self.correct_guesses_val[0]/self.correct_guesses_val[1]
-            iou25 = self.iou25_val[0]/self.iou25_val[1]
-            iou50 = self.iou50_val[0]/self.iou50_val[1]
+            iou25 = self.iou_val[0]/self.iou_val[2]
+            iou50 = self.iou_val[1]/self.iou_val[2]
             self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
             print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
         
@@ -201,8 +203,7 @@ class Joint_Light(pl.LightningModule):
         self.log("val/meteor_iou50", meteor[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
 
         self.correct_guesses_val = [0, 0]
-        self.iou25_val = [0, 0]
-        self.iou50_val = [0, 0]
+        self.iou_val = [0, 0, 0]
         self.candidates_iou25 = {}
         self.candidates_iou50 = {}
 
@@ -243,11 +244,19 @@ class Joint_Light(pl.LightningModule):
             bboxes_gt = [get_bbox(verts, points) for verts in GT_verts_arr]
             iou = calculate_iou(bboxes_pred[0], bboxes_gt[0])
                 
-            self.bbox_iou_test[2] += 1.
-            if iou >= 0.25:
-                self.bbox_iou_test[0] += 1.
-                if iou >= 0.5:
-                    self.bbox_iou_test[1] += 1.
+            if self.unique_multiple_lookup[scan_id][data_dict["object_ids"][i]][data_dict["ann_ids"][i]] == 0:
+                self.unique_iou[2] += 1.
+                if iou >= 0.25:
+                    self.unique_iou[0] += 1.
+                    if iou >= 0.5:
+                        self.unique_iou[1] += 1.
+            else:
+                self.multiple_iou[2] += 1.
+                if iou >= 0.25:
+                    self.multiple_iou[0] += 1.
+                    if iou >= 0.5:
+                        self.multiple_iou[1] += 1.
+            
 
             gt_descr = tokenizer.decode(data_dict["target_word_ids"][i][1:data_dict['num_tokens'][i]-1])
             # out = self.transformer.inferrence_DC(data_dict)
@@ -258,8 +267,12 @@ class Joint_Light(pl.LightningModule):
             )
 
     def on_test_epoch_end(self):
-        print("bbox IOU25:", self.bbox_iou_test[0]/self.bbox_iou_test[2])
-        print("bbox IOU50:", self.bbox_iou_test[1]/self.bbox_iou_test[2])
+        print("Unique IOU25:", self.unique_iou[0] / self.unique_iou[2])
+        print("Unique IOU50:", self.unique_iou[1] / self.unique_iou[2])
+        print("Multiple IOU25:", self.multiple_iou[0] / self.multiple_iou[2])
+        print("Multiple IOU50:", self.multiple_iou[1] / self.multiple_iou[2])
+        print("Overall IOU25:", (self.unique_iou[0]+self.multiple_iou[0]) / (self.unique_iou[2]+self.multiple_iou[2]))
+        print("Overall IOU50:", (self.unique_iou[1]+self.multiple_iou[1]) / (self.unique_iou[2]+self.multiple_iou[2]))
         all_pred_verts = []
         all_gt_verts = []
         all_scan_desc_ids = []
