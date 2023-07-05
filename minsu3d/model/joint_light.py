@@ -143,18 +143,8 @@ class Joint_Light(pl.LightningModule):
                 for o in data_dict["queried_objs"][bi]:
                     if data_dict["ious_on_cluster"][bi][guess][o] >= 0.25:
                         self.iou_val[0] += 1
-                        key = "{}|{}|{}".format(data_dict["scene_ids"][bi], data_dict["object_ids"][bi], data_dict["object_names"][bi])
-                        candidate_descr = output_dict["candidate_descrs"][bi]
-                        if key in self.candidates_iou25:
-                            self.candidates_iou25[key].append(candidate_descr)
-                        else:
-                            self.candidates_iou25[key] = [candidate_descr]
                         if data_dict["ious_on_cluster"][bi][guess][o] >= 0.5:
                             self.iou_val[1] += 1
-                            if key in self.candidates_iou50:
-                                self.candidates_iou50[key].append(candidate_descr)
-                            else:
-                                self.candidates_iou50[key] = [candidate_descr]
 
 
     def on_train_epoch_end(self):
@@ -171,45 +161,45 @@ class Joint_Light(pl.LightningModule):
             self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
             print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
         
-        bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
+        # bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
 
-        folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'val_scores')
-        os.makedirs(folder_path, exist_ok=True)
-        score_path = os.path.join(folder_path, "epoch_{}.json".format(self.epoch_count))
-        self.epoch_count += 10
+        # folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'val_scores')
+        # os.makedirs(folder_path, exist_ok=True)
+        # score_path = os.path.join(folder_path, "epoch_{}.json".format(self.epoch_count))
+        # self.epoch_count += 10
 
-        scores = {
-                "iou25": iou25,
-                "iou50": iou50,
-                "bleu4_iou25": bleu4[0],
-                "cider_iou25": cider[0],
-                "rouge_iou25": rouge[0],
-                "meteor_iou25": meteor[0],
-                "bleu4_iou50": bleu4[1],
-                "cider_iou50": cider[1],
-                "rouge_iou50": rouge[1],
-                "meteor_iou50": meteor[1]
-                }
-        with open(score_path, "w") as f:
-            json.dump(scores, f, indent=4)
+        # scores = {
+        #         "iou25": iou25,
+        #         "iou50": iou50,
+        #         "bleu4_iou25": bleu4[0],
+        #         "cider_iou25": cider[0],
+        #         "rouge_iou25": rouge[0],
+        #         "meteor_iou25": meteor[0],
+        #         "bleu4_iou50": bleu4[1],
+        #         "cider_iou50": cider[1],
+        #         "rouge_iou50": rouge[1],
+        #         "meteor_iou50": meteor[1]
+        #         }
+        # with open(score_path, "w") as f:
+        #     json.dump(scores, f, indent=4)
 
-        self.log("val/bleu4_iou25", bleu4[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/cider_iou25", cider[0], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/rouge_iou25", rouge[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/meteor_iou25", meteor[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/bleu4_iou50", bleu4[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/cider_iou50", cider[1], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/rouge_iou50", rouge[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("val/meteor_iou50", meteor[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/bleu4_iou25", bleu4[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/cider_iou25", cider[0], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/rouge_iou25", rouge[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/meteor_iou25", meteor[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/bleu4_iou50", bleu4[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/cider_iou50", cider[1], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/rouge_iou50", rouge[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
+        # self.log("val/meteor_iou50", meteor[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
 
         self.correct_guesses_val = [0, 0]
         self.iou_val = [0, 0, 0]
-        self.candidates_iou25 = {}
-        self.candidates_iou50 = {}
+        # self.candidates_iou25 = {}
+        # self.candidates_iou50 = {}
 
     def test_step(self, data_dict, idx):
         # prepare input and forward
-        output_dict = self(data_dict)        
+        output_dict = self.transformer.feed(data_dict)     
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         
         batch_size = len(data_dict['scan_desc_id'])
@@ -248,14 +238,34 @@ class Joint_Light(pl.LightningModule):
                 self.unique_iou[2] += 1.
                 if iou >= 0.25:
                     self.unique_iou[0] += 1.
+                    key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
+                    candidate_descr = output_dict["captions"][i]
+                    if key in self.candidates_iou25:
+                        self.candidates_iou25[key].append(candidate_descr)
+                    else:
+                        self.candidates_iou25[key] = [candidate_descr]
                     if iou >= 0.5:
                         self.unique_iou[1] += 1.
+                        if key in self.candidates_iou50:
+                            self.candidates_iou50[key].append(candidate_descr)
+                        else:
+                            self.candidates_iou50[key] = [candidate_descr]
             else:
                 self.multiple_iou[2] += 1.
                 if iou >= 0.25:
                     self.multiple_iou[0] += 1.
+                    key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
+                    candidate_descr = output_dict["captions"][i]
+                    if key in self.candidates_iou25:
+                        self.candidates_iou25[key].append(candidate_descr)
+                    else:
+                        self.candidates_iou25[key] = [candidate_descr]
                     if iou >= 0.5:
                         self.multiple_iou[1] += 1.
+                        if key in self.candidates_iou50:
+                            self.candidates_iou50[key].append(candidate_descr)
+                        else:
+                            self.candidates_iou50[key] = [candidate_descr]
             
 
             gt_descr = tokenizer.decode(data_dict["target_word_ids"][i][1:data_dict['num_tokens'][i]-1])
@@ -297,3 +307,23 @@ class Joint_Light(pl.LightningModule):
                 save_dir, all_pred_verts, all_gt_verts, all_scan_desc_ids, all_desc, all_bboxes_pred, all_bboxes_gt
             )
             self.print(f"\nPredictions saved at {os.path.abspath(save_dir)}")
+
+        # F1 scores
+        bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
+
+        folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'F1_scores')
+        os.makedirs(folder_path, exist_ok=True)
+        score_path = os.path.join(folder_path, "F1_scores.json")
+
+        scores = {
+                "bleu4_iou25": bleu4[0],
+                "cider_iou25": cider[0],
+                "rouge_iou25": rouge[0],
+                "meteor_iou25": meteor[0],
+                "bleu4_iou50": bleu4[1],
+                "cider_iou50": cider[1],
+                "rouge_iou50": rouge[1],
+                "meteor_iou50": meteor[1]
+                }
+        with open(score_path, "w") as f:
+            json.dump(scores, f, indent=4)
