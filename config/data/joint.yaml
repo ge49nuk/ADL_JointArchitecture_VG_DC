@@ -7,7 +7,7 @@ scanrefer_path: ${data.dataset_root_path}/scanrefer
 scans_path: ${data.dataset_root_path}/scannetv2/scans
 
 
-batch_size: 4
-num_workers: 4
+batch_size: 12
+num_workers: 8
 
 instance_size: 48

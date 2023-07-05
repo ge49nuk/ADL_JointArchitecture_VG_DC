@@ -89,8 +89,7 @@ def _collate_fn(batch):
 
     for b in batch:
         point_features = b["point_features"]
-        insts = np.split(point_features, b["instance_splits"], axis=0) # (#instances, #pts, dim_pt_feats)
-        scene_insts = torch.stack([torch.from_numpy(inst[np.random.choice(inst.shape[0] , 48, replace=False)].flatten()) for inst in insts]) #(#instances, dim_inst_feats=1536)
+        scene_insts = point_features #(#instances, dim_inst_feats= samples_per_proposal * 32)
         instances.append(scene_insts)
 
         scene_splits.append(scene_insts.size()[0] + scene_splits[-1])

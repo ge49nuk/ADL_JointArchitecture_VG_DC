@@ -144,7 +144,6 @@ def generate_colored_ply(args, points, colors, indices,
                 else:
                     colors[vertexIndex] = [255,0,0] # pred
         
-        #TODO  visualize bboxes
     else:
         for bbox in pred_bboxes:
             for edge in hollow_bbox(bbox):

@@ -1,6 +1,5 @@
 import os
 import random
-import sys
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -9,75 +8,82 @@ from torch.utils.data import Dataset
 
 class JointDataset(Dataset):
     def __init__(self, cfg, split):
+
         self.cfg = cfg
         self.split = split
-        # self.max_num_point = cfg.data.max_num_point
         self.instance_size = cfg.data.instance_size
-        self.augs_per_scene = 4 # For train set
-        self.num_descrs = 12 # For train set
+        
         self._load_from_disk()
+
+    
+    def _load_single_scan(self, scan_id, scan_fn):
+        split_folder = os.path.join(self.cfg.data.dataset_path, self.split)
+        scan_folder = os.path.join(split_folder, scan_id)
+        scan_file = os.path.join(scan_folder, f"{scan_fn}")
+        scan = torch.load(scan_file)
+        scan["scan_fn"] = scan_fn
+
+        # Sampling point features
+        samples = self.cfg.model.samples_per_proposal
+        point_features = scan["point_features"]
+        insts = np.split(point_features, scan["instance_splits"], axis=0) # (#instances, #pts, dim_pt_feats)
+        scan["point_features"] = torch.stack([torch.from_numpy\
+        (
+            np.append(
+                inst[np.random.choice(inst.shape[0] , min(samples, inst.shape[0]), replace=False)].flatten(),\
+                #filling up with zeros, in case: #samples > #proposal_feats
+                torch.zeros((samples - min(samples, inst.shape[0]), inst.shape[1]))
+            )
+        ) for inst in insts])
+
+        return scan
+
 
     def _load_from_disk(self):
         split_folder = os.path.join(self.cfg.data.dataset_path, self.split)
         scan_ids = os.listdir(split_folder)
         self.scans = []
+        self.scans_idx = []
         self.descrs = []
-        self.scan_and_descr_idx = []
-
-        if self.split == 'train':
-            for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
-                if scan_id == "_ignore":
-                    continue
-                scan_folder = os.path.join(split_folder, scan_id)
-                scan_fns = os.listdir(scan_folder)
-                num_augs = 0
-                for scan_fn in scan_fns:
-                    if scan_fn == "descr":
-                        continue
-                    if num_augs >= self.augs_per_scene:
-                        break
-                    num_augs += 1
-                    scan_file = os.path.join(scan_folder, f"{scan_fn}")
-                    self.scans.append(torch.load(scan_file))
-
-                    descr_folder = os.path.join(scan_folder, "descr")
-                    descr_fns = os.listdir(descr_folder)
-                    num_descrs = min(self.num_descrs, len(descr_fns))
-                    # selected_idx = np.random.choice(len(descr_fns) , num_descrs, replace=False)
-                    # for i in selected_idx:
-                    for i in range(num_descrs):
-                        descr_fn = descr_fns[i]
-                        descr_file = os.path.join(descr_folder, descr_fn)
-                        self.descrs.append(torch.load(descr_file))
-                        self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
         
-        else: # Val split
-            for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
-                if scan_id == "_ignore":
+        curr_scan = 0
+        for scan_id in tqdm(scan_ids, desc=f"Loading joint_{self.split} data from disk"):
+            if scan_id == "_ignore":
+                continue
+            scan_folder = os.path.join(split_folder, scan_id)
+            scan_fns = os.listdir(scan_folder)
+            # Load scene augmentations
+            num_augs = 0
+            for scan_fn in scan_fns:
+                if scan_fn == "descr":
                     continue
-                scan_folder = os.path.join(split_folder, scan_id)
-                scan_fns = os.listdir(scan_folder)
-                for scan_fn in scan_fns:
-                    if scan_fn == "descr":
-                        continue
-                    scan_file = os.path.join(scan_folder, f"{scan_fn}")
-                    self.scans.append(torch.load(scan_file))
-                    descr_folder = os.path.join(scan_folder, "descr")
-                    descr_fns = os.listdir(descr_folder)
-                    for descr_fn in descr_fns:
-                        descr_file = os.path.join(descr_folder, descr_fn)
-                        self.descrs.append(torch.load(descr_file))
-                        self.scan_and_descr_idx.append((len(self.scans)-1, len(self.descrs)-1)) # Mapping: idx -> (scan_idx, descr_idx)
-                    break # Load only one scene
+                if num_augs >= self.cfg.model.augs_per_scene or (self.split == 'val' and num_augs >= 1):
+                    break
+                self.scans.append({"scan_id":scan_id, "scan_fn":scan_fn})
+                num_augs += 1
 
+            # Load descriptions
+            descr_folder = os.path.join(scan_folder, "descr")
+            descr_fns = os.listdir(descr_folder)
+            num_descrs = min(self.cfg.model.num_descriptions, len(descr_fns))
+            for i in range(num_descrs):
+                descr_file = os.path.join(descr_folder, descr_fns[i])
+                self.descrs.append(torch.load(descr_file))
+                self.scans_idx.append((curr_scan, curr_scan + num_augs)) # Mapping: idx -> scan
+            curr_scan += num_augs
 
     def __len__(self):
-        return len(self.scan_and_descr_idx)
+        return len(self.scans_idx)
    
     
     def __getitem__(self, idx):
-        scan = self.scans[self.scan_and_descr_idx[idx][0]]
-        descr = self.descrs[self.scan_and_descr_idx[idx][1]]
+        # Load scene from disc
+        scan_id_range = self.scans_idx[idx]
+        scan_info = self.scans[random.randint(scan_id_range[0], scan_id_range[1]-1)]
+        scan = self._load_single_scan(scan_info["scan_id"], scan_info["scan_fn"])
+
+        descr = self.descrs[idx]
+
 
         # Calculate best proposals
         best_proposals = []

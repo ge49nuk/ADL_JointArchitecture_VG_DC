@@ -75,7 +75,7 @@ def read_seg_file(seg_file):
         seg2verts[seg].append(vert)
     return seg2verts, vert2seg
 
-def read_descr_file(desc_file, agg_file, iou_0_set, scan):
+def read_descr_file(desc_file, agg_file, iou_0_set, scan, split):
     with open(desc_file, 'r') as json_data:
         data = json.load(json_data)
     inst_descr = []
@@ -93,7 +93,7 @@ def read_descr_file(desc_file, agg_file, iou_0_set, scan):
                     ignored_obj += 1
             instance["object_id"] = [int(obj_id) - ignored_obj]
             instance["obj_id"] = obj_id # Original obj id
-            if scan + str(instance["object_id"][0]) in iou_0_set:
+            if split == "train" and scan + str(instance["object_id"][0]) in iou_0_set:
                 continue
         for ann_id in scan_data[obj_id]:
             instance_cpy = instance.copy()
@@ -149,7 +149,7 @@ def process_one_scan(scan, cfg, split, label_map, iou_0_set):
         # read agg_file
         object_id2segs, label2segs = read_agg_file(agg_file_path)
 
-        object_descr = read_descr_file(descr_file_path, agg_file_path, iou_0_set, scan)
+        object_descr = read_descr_file(descr_file_path, agg_file_path, iou_0_set, scan, split)
 
         # get semantic labels
         # create a map, skip invalid labels to make the final semantic labels consecutive

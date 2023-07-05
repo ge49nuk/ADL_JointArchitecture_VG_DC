@@ -1,7 +1,9 @@
 # Managed by Hydra
 
 ckpt_path: null
-quick_training: True
+augs_per_scene: 6
+num_descriptions: 16
+samples_per_proposal: 48
 
 logger:
   # https://pytorch-lightning.readthedocs.io/en/stable/extensions/generated/pytorch_lightning.loggers.WandbLogger.html
@@ -17,7 +19,7 @@ trainer:
   num_nodes: 1
   max_epochs: 300
   num_sanity_val_steps: 10
-  check_val_every_n_epoch: 10
+  check_val_every_n_epoch: 5
   profiler: simple
 
 # https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html
