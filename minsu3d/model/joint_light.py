@@ -76,6 +76,7 @@ class Joint_Light(pl.LightningModule):
         losses["Match_loss"] = output_dict["Match_loss"]
         losses["CLS_loss"] = output_dict["CLS_loss"]
         losses["DC_loss"] = output_dict["DC_loss"]
+        losses["Cider_loss"] = output_dict["Cider_loss"]
         return losses
     
     
@@ -86,10 +87,7 @@ class Joint_Light(pl.LightningModule):
         batch_size = len(output_dict["Match_scores"])
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
-            self.log(
-                f"train/{loss_name}", loss_value, on_step=False, sync_dist=True,
-                on_epoch=True, batch_size=batch_size
-            )
+            self.log(f"train/{loss_name}", loss_value, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
         self.log("train/total_loss", total_loss, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
         self.log("train_loss", total_loss, prog_bar=True, sync_dist=True, on_step=False, on_epoch=True,  batch_size=batch_size)
     
@@ -126,7 +124,6 @@ class Joint_Light(pl.LightningModule):
             total_loss += loss_value
             self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
         self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
-
 
         # Log correct guesses
         target_proposals = data_dict['target_proposals']
@@ -199,7 +196,7 @@ class Joint_Light(pl.LightningModule):
 
     def test_step(self, data_dict, idx):
         # prepare input and forward
-        output_dict = self.transformer.feed(data_dict)     
+        Match_scores = self.transformer.feed_VG(data_dict)     
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         
         batch_size = len(data_dict['scan_desc_id'])
@@ -207,7 +204,7 @@ class Joint_Light(pl.LightningModule):
             #prepare data for visualization
             queried_obj = data_dict["queried_objs"][i]
             predicted_proposal_ids = []
-            match_scores_cpy = output_dict["Match_scores"][i]
+            match_scores_cpy = Match_scores[i]
             for _ in queried_obj:
                 predicted_proposal_ids.append(torch.argmax(match_scores_cpy))
                 match_scores_cpy[torch.argmax(match_scores_cpy)] = -9999
@@ -239,50 +236,40 @@ class Joint_Light(pl.LightningModule):
                 if iou >= 0.25:
                     self.unique_iou[0] += 1.
                     key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
-                    candidate_descr = output_dict["captions"][i]
-                    if key in self.candidates_iou25:
-                        self.candidates_iou25[key].append(candidate_descr)
-                    else:
+                    if key not in self.candidates_iou25:
+                        candidate_descr = self.transformer.feed_DC(data_dict, idx=i)
                         self.candidates_iou25[key] = [candidate_descr]
                     if iou >= 0.5:
                         self.unique_iou[1] += 1.
-                        if key in self.candidates_iou50:
-                            self.candidates_iou50[key].append(candidate_descr)
-                        else:
-                            self.candidates_iou50[key] = [candidate_descr]
+                        if key not in self.candidates_iou50:
+                            self.candidates_iou50[key] = self.candidates_iou25[key]
             else:
                 self.multiple_iou[2] += 1.
                 if iou >= 0.25:
                     self.multiple_iou[0] += 1.
                     key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
-                    candidate_descr = output_dict["captions"][i]
-                    if key in self.candidates_iou25:
-                        self.candidates_iou25[key].append(candidate_descr)
-                    else:
+                    if key not in self.candidates_iou25:
+                        candidate_descr = self.transformer.feed_DC(data_dict, idx=i)
                         self.candidates_iou25[key] = [candidate_descr]
                     if iou >= 0.5:
                         self.multiple_iou[1] += 1.
-                        if key in self.candidates_iou50:
-                            self.candidates_iou50[key].append(candidate_descr)
-                        else:
-                            self.candidates_iou50[key] = [candidate_descr]
+                        if key not in self.candidates_iou50:
+                            self.candidates_iou50[key] = self.candidates_iou25[key]
             
 
             gt_descr = tokenizer.decode(data_dict["target_word_ids"][i][1:data_dict['num_tokens'][i]-1])
-            # out = self.transformer.inferrence_DC(data_dict)
-            # print(out["Captions"][0])
 
             self.val_test_step_outputs.append(
                 (predicted_verts_arr, GT_verts_arr, scan_desc_id, gt_descr, bboxes_pred, bboxes_gt)
             )
 
     def on_test_epoch_end(self):
-        print("Unique IOU25:", self.unique_iou[0] / self.unique_iou[2])
-        print("Unique IOU50:", self.unique_iou[1] / self.unique_iou[2])
-        print("Multiple IOU25:", self.multiple_iou[0] / self.multiple_iou[2])
-        print("Multiple IOU50:", self.multiple_iou[1] / self.multiple_iou[2])
-        print("Overall IOU25:", (self.unique_iou[0]+self.multiple_iou[0]) / (self.unique_iou[2]+self.multiple_iou[2]))
-        print("Overall IOU50:", (self.unique_iou[1]+self.multiple_iou[1]) / (self.unique_iou[2]+self.multiple_iou[2]))
+        # print("Unique IOU25:", self.unique_iou[0] / self.unique_iou[2])
+        # print("Unique IOU50:", self.unique_iou[1] / self.unique_iou[2])
+        # print("Multiple IOU25:", self.multiple_iou[0] / self.multiple_iou[2])
+        # print("Multiple IOU50:", self.multiple_iou[1] / self.multiple_iou[2])
+        # print("Overall IOU25:", (self.unique_iou[0]+self.multiple_iou[0]) / (self.unique_iou[2]+self.multiple_iou[2]))
+        # print("Overall IOU50:", (self.unique_iou[1]+self.multiple_iou[1]) / (self.unique_iou[2]+self.multiple_iou[2]))
         all_pred_verts = []
         all_gt_verts = []
         all_scan_desc_ids = []

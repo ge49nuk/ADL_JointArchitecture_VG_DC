@@ -101,6 +101,10 @@ def _collate_fn(batch):
         num_tokens.append(b["num_tokens"])
         target_classes.append(torch.from_numpy(b["target_class"]))
         ious_on_cluster.append(b["ious_on_cluster"])
+
+        scene_ids.append(b["scene_id"])
+        object_ids.append(b["object_id"])
+        object_names.append(b["object_name"])
         
         if 'queried_objs' in b.keys():
             queried_objs.append(b["queried_objs"])
@@ -108,10 +112,6 @@ def _collate_fn(batch):
             instance_ids.append(torch.from_numpy(b["instance_ids"]))
             scan_desc_id.append(b["scan_desc_id"])
             ann_id.append(b["ann_id"])
-
-            scene_ids.append(b["scene_id"])
-            object_ids.append(b["object_id"])
-            object_names.append(b["object_name"])
         
     
     data = {'instances': torch.cat(instances, dim=0)}
@@ -124,15 +124,15 @@ def _collate_fn(batch):
     data['target_classes'] = target_classes
     data["ious_on_cluster"] = ious_on_cluster
 
+    data['scene_ids'] = scene_ids
+    data['object_ids'] = object_ids
+    data['object_names'] = object_names
+
     if 'queried_objs' in b.keys():
         data['queried_objs'] = queried_objs
         data['proposals_idx'] = proposals_idx
         data['instance_ids'] = instance_ids
         data['scan_desc_id'] = scan_desc_id
         data["ann_ids"] = ann_id
-
-        data['scene_ids'] = scene_ids
-        data['object_ids'] = object_ids
-        data['object_names'] = object_names
 
     return data

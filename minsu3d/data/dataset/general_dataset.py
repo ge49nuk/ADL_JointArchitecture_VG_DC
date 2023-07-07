@@ -18,7 +18,7 @@ class GeneralDataset(Dataset):
         self.split = split
         self.max_num_point = cfg.data.max_num_point
          
-        self.augs_per_scene = 6
+        self.augs_per_scene = 16
         self.aug_memory = {}
         self._load_from_disk()
 

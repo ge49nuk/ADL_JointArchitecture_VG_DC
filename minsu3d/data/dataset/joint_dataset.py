@@ -104,6 +104,11 @@ class JointDataset(Dataset):
         data["target_word_ids"] = descr['target_word_ids'] 
         data["num_tokens"] = descr['num_tokens'] 
         data["target_class"] = descr['target_class']
+
+        # For corpus generation
+        data["scene_id"] = descr['scene_id']
+        data["object_id"] = descr['object_id']
+        data["object_name"] = descr['object_name']
         
         if self.split == "val":
             # For testing
@@ -112,10 +117,5 @@ class JointDataset(Dataset):
             data["instance_ids"] = scan['instance_ids']
             data["scan_desc_id"] = descr['scan_desc_id']
             data["ann_id"] = descr['ann_id']
-
-            # For corpus generation
-            data["scene_id"] = descr['scene_id']
-            data["object_id"] = descr['object_id']
-            data["object_name"] = descr['object_name']
 
         return data
