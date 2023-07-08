@@ -56,17 +56,17 @@ def organize_candidates(corpus, candidates):
 def eval_cap(cfg, candidates_iou25, candidates_iou50, force=False, max_len=132):
     
     # corpus
-    corpus_path = os.path.join(cfg.data.dataset_root_path, "corpus.json")
+    corpus_path = os.path.join(cfg.data.dataset_root_path, "corpus_val.json")
     scanrefer_path = os.path.join(cfg.data.scanrefer_path, "ScanRefer_filtered_val.json")
     if not os.path.exists(corpus_path) or force:
-        print("preparing corpus...")
+        print("preparing corpus_val...")
         raw_data = json.load(open(scanrefer_path))
 
         corpus = prepare_corpus(raw_data, max_len)
         with open(corpus_path, "w") as f:
             json.dump(corpus, f, indent=4)
     else:
-        print("loading corpus...")
+        print("loading corpus_val...")
         with open(corpus_path) as f:
             corpus = json.load(f)
 

@@ -8,9 +8,13 @@ import sys
 import os
 from transformers import BertTokenizer, BertModel
 import minsu3d.capeval.cider.cider as capcider
+from minsu3d.capeval.eval_helper import prepare_corpus
 
 ROOT_DIR = os.path.abspath(os.curdir)
-CORPUS_PATH = os.path.join(ROOT_DIR, "data", "corpus.json")
+CORPUS_TRAIN_PATH = os.path.join(ROOT_DIR, "data", "corpus_train.json")
+CORPUS_VAL_PATH = os.path.join(ROOT_DIR, "data", "corpus_val.json")
+SCANREFER_TRAIN_PATH = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_train.json")
+SCANREFER_VAL_PATH = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_val.json")
 
 class PositionalEncoder(nn.Module):
     def __init__(self, dim_model, dropout_p, max_len):
@@ -84,7 +88,7 @@ class Transformer_Light(nn.Module):
         # Define loss criterion
         self.loss_criterion_VG = nn.CrossEntropyLoss()
         self.loss_criterion_DC = nn.CrossEntropyLoss()
-        self.loss_criterion_bce = nn.BCEWithLogitsLoss()
+        # self.loss_criterion_bce = nn.BCEWithLogitsLoss()
         
         # Initialize weights
         # self.init_weights()
@@ -93,6 +97,29 @@ class Transformer_Light(nn.Module):
         for param in self.bert.parameters():
             param.requires_grad = False
         self.bert.eval()
+
+        # Get training corpus
+        if not os.path.exists(CORPUS_TRAIN_PATH):
+            print("preparing corpus_train...")
+            raw_data = json.load(open(SCANREFER_TRAIN_PATH))
+            self.corpus_train = prepare_corpus(raw_data)
+            with open(CORPUS_TRAIN_PATH, "w") as f:
+                json.dump(self.corpus_train, f, indent=4)
+        else:
+            print("loading corpus_train...")
+            with open(CORPUS_TRAIN_PATH) as f:
+                self.corpus_train = json.load(f)
+        # Get validation corpus
+        if not os.path.exists(CORPUS_VAL_PATH):
+            print("preparing corpus_val...")
+            raw_data = json.load(open(SCANREFER_VAL_PATH))
+            self.corpus_val = prepare_corpus(raw_data)
+            with open(CORPUS_VAL_PATH, "w") as f:
+                json.dump(self.corpus_val, f, indent=4)
+        else:
+            print("loading corpus_val...")
+            with open(CORPUS_VAL_PATH) as f:
+                self.corpus_val = json.load(f)
 
     def forward(self, data_dict):
         instances = data_dict['instances']
@@ -126,8 +153,7 @@ class Transformer_Light(nn.Module):
         cands = {}
         gts = {}
         refs = {}
-        with open(CORPUS_PATH) as f:
-            corpus = json.load(f)
+
         for i, scene in enumerate(scenes):
             num_proposals = num_instances[i]
             len_text_tokens = num_tokens[i] - 1
@@ -162,7 +188,10 @@ class Transformer_Light(nn.Module):
             if key not in cands:
                 cands[key] = []
                 gts[key] = []
-            refs[key] = corpus[key]
+            if key in self.corpus_train:
+                refs[key] = self.corpus_train[key]
+            else:
+                refs[key] = self.corpus_val[key]
             # Dense Captioning pass
             for target_proposal in best_proposals[i]:
                 target_box_token = box_tokens[target_proposal]
@@ -500,22 +529,3 @@ class Transformer_Light(nn.Module):
         # 0.0 0.0 0.0  0.0  0.0  0.0 -inf -inf
         # 0.0 0.0 0.0  0.0  0.0  0.0  0.0 -inf
         # 0.0 0.0 0.0  0.0  0.0  0.0  0.0  0.0
-
-    def check_candidates(self, corpus, candidates):
-        placeholder = "sos eos"
-        corpus_keys = list(corpus.keys())
-        candidate_keys = list(candidates.keys())
-        missing_keys = [key for key in corpus_keys if key not in candidate_keys]
-
-        if len(missing_keys) != 0:
-            for key in missing_keys:
-                candidates[key] = [placeholder]
-
-        return candidates
-
-    def organize_candidates(self, corpus, candidates):
-        new_candidates = {}
-        for key in corpus.keys():
-            new_candidates[key] = candidates[key]
-
-        return new_candidates
