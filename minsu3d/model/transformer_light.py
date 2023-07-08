@@ -11,10 +11,6 @@ import minsu3d.capeval.cider.cider as capcider
 from minsu3d.capeval.eval_helper import prepare_corpus
 
 ROOT_DIR = os.path.abspath(os.curdir)
-CORPUS_TRAIN_PATH = os.path.join(ROOT_DIR, "data", "corpus_train.json")
-CORPUS_VAL_PATH = os.path.join(ROOT_DIR, "data", "corpus_val.json")
-SCANREFER_TRAIN_PATH = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_train.json")
-SCANREFER_VAL_PATH = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_val.json")
 
 class PositionalEncoder(nn.Module):
     def __init__(self, dim_model, dropout_p, max_len):
@@ -99,27 +95,33 @@ class Transformer_Light(nn.Module):
         self.bert.eval()
 
         # Get training corpus
-        if not os.path.exists(CORPUS_TRAIN_PATH):
+        corpus_train_path = os.path.join(ROOT_DIR, "data", "corpus_train.json")
+        scanrefer_train_path = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_train.json")
+        if not os.path.exists(corpus_train_path):
             print("preparing corpus_train...")
-            raw_data = json.load(open(SCANREFER_TRAIN_PATH))
+            raw_data = json.load(open(scanrefer_train_path))
             self.corpus_train = prepare_corpus(raw_data)
-            with open(CORPUS_TRAIN_PATH, "w") as f:
+            with open(corpus_train_path, "w") as f:
                 json.dump(self.corpus_train, f, indent=4)
         else:
             print("loading corpus_train...")
-            with open(CORPUS_TRAIN_PATH) as f:
+            with open(corpus_train_path) as f:
                 self.corpus_train = json.load(f)
         # Get validation corpus
-        if not os.path.exists(CORPUS_VAL_PATH):
+        corpus_val_path = os.path.join(ROOT_DIR, "data", "corpus_val.json")
+        scanrefer_val_path = os.path.join(ROOT_DIR, "data", "scanrefer", "ScanRefer_filtered_val.json")
+        if not os.path.exists(corpus_val_path):
             print("preparing corpus_val...")
-            raw_data = json.load(open(SCANREFER_VAL_PATH))
+            raw_data = json.load(open(scanrefer_val_path))
             self.corpus_val = prepare_corpus(raw_data)
-            with open(CORPUS_VAL_PATH, "w") as f:
+            with open(corpus_val_path, "w") as f:
                 json.dump(self.corpus_val, f, indent=4)
         else:
             print("loading corpus_val...")
-            with open(CORPUS_VAL_PATH) as f:
+            with open(corpus_val_path) as f:
                 self.corpus_val = json.load(f)
+        
+        self.disturb = False
 
     def forward(self, data_dict):
         instances = data_dict['instances']
@@ -205,6 +207,27 @@ class Transformer_Light(nn.Module):
                 output_text_tokens = output_DC_tokens[num_proposals:]
                 assert output_text_tokens.size() == (len_text_tokens, self.dim_model)
                 DC_scores = self.caphead(output_text_tokens)
+                
+                # Disturb the input and feed the transformer again
+                if self.disturb:
+                    predicted_ids = DC_scores.argmax(dim=-1)
+                    # replaced_idx = random.randint(1, len_text_tokens)
+                    maxlen = min(len_text_tokens, 15)
+                    replaced_idx = random.randint(1, maxlen)
+                    new_input_ids = target_word_ids[i]
+                    new_input_ids[replaced_idx] = predicted_ids[replaced_idx - 1]
+                    new_input_embs = self.word_to_model(self.bert(torch.stack([new_input_ids]))[0])
+                    new_text_tokens = self.positional_encoder(new_input_embs)[0][:len_text_tokens]
+                    new_captioning_cue = new_text_tokens + target_box_token
+                    assert new_captioning_cue.size() == (len_text_tokens, self.dim_model)
+                    new_DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
+                    assert new_DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
+                    mask = self.get_seq2seq_mask(num_proposals, len_text_tokens)
+                    new_output_DC_tokens = self.transformer_encoder(new_DC_tokens, mask.to("cuda"))
+                    new_output_text_tokens = new_output_DC_tokens[num_proposals:]
+                    assert new_output_text_tokens.size() == (len_text_tokens, self.dim_model)
+                    DC_scores = self.caphead(new_output_text_tokens)
+                
                 DC_scores_list.append(DC_scores)
                 # Compute CE loss
                 assert DC_scores.size() == (len_text_tokens, self.size_vocab)
@@ -529,3 +552,9 @@ class Transformer_Light(nn.Module):
         # 0.0 0.0 0.0  0.0  0.0  0.0 -inf -inf
         # 0.0 0.0 0.0  0.0  0.0  0.0  0.0 -inf
         # 0.0 0.0 0.0  0.0  0.0  0.0  0.0  0.0
+    
+    def start_disturb(self):
+        self.disturb = True
+    
+    def disable_disturb(self):
+        self.disturb = False

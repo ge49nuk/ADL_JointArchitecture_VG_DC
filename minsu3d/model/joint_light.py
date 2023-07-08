@@ -114,6 +114,8 @@ class Joint_Light(pl.LightningModule):
     #     )
 
     def validation_step(self, data_dict, idx):
+        if self.transformer.disturb:
+            self.transformer.disable_disturb()
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
         batch_size = len(output_dict["Match_scores"])
@@ -149,6 +151,9 @@ class Joint_Light(pl.LightningModule):
             train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
             self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.correct_guesses_train = [0,0]
+        self.epoch_count += 1
+        if self.epoch_count == self.hparams.cfg.model.disturbation_start_epoch:
+            self.transformer.start_disturb()
     
     def on_validation_epoch_end(self):
         if not self.correct_guesses_val[1] == 0.0:
@@ -193,8 +198,12 @@ class Joint_Light(pl.LightningModule):
         self.iou_val = [0, 0, 0]
         # self.candidates_iou25 = {}
         # self.candidates_iou50 = {}
+        if self.epoch_count >= self.hparams.cfg.model.disturbation_start_epoch:
+            self.transformer.start_disturb()
 
     def test_step(self, data_dict, idx):
+        if self.transformer.disturb:
+            self.transformer.disable_disturb()
         # prepare input and forward
         Match_scores = self.transformer.feed_VG(data_dict)     
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
