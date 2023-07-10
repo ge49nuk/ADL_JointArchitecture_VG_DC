@@ -30,7 +30,7 @@ class Joint_Light(pl.LightningModule):
         self.candidates_iou25 = {}
         self.candidates_iou50 = {}
 
-        self.epoch_count = 0
+        # self.epoch_count = 0
 
         self.unique_multiple_lookup = _get_unique_multiple_lookup(self.hparams.cfg)
         self.unique_iou = [0,0,0] # <- iou25 iou50 total
@@ -87,7 +87,7 @@ class Joint_Light(pl.LightningModule):
         batch_size = len(output_dict["Match_scores"])
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
-            self.log(f"train/{loss_name}", loss_value, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
+            self.log(f"train/{loss_name}", loss_value, prog_bar=True, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
         self.log("train/total_loss", total_loss, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
         self.log("train_loss", total_loss, prog_bar=True, sync_dist=True, on_step=False, on_epoch=True,  batch_size=batch_size)
     
@@ -114,8 +114,8 @@ class Joint_Light(pl.LightningModule):
     #     )
 
     def validation_step(self, data_dict, idx):
-        if self.transformer.disturb:
-            self.transformer.disable_disturb()
+        # if self.transformer.disturb:
+        #     self.transformer.disable_disturb()
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
         batch_size = len(output_dict["Match_scores"])
@@ -151,9 +151,9 @@ class Joint_Light(pl.LightningModule):
             train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
             self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.correct_guesses_train = [0,0]
-        self.epoch_count += 1
-        if self.epoch_count == self.hparams.cfg.model.disturbation_start_epoch:
-            self.transformer.start_disturb()
+        # self.epoch_count += 1
+        # if self.epoch_count == self.hparams.cfg.model.disturbation_start_epoch:
+        #     self.transformer.start_disturb()
     
     def on_validation_epoch_end(self):
         if not self.correct_guesses_val[1] == 0.0:
@@ -198,12 +198,12 @@ class Joint_Light(pl.LightningModule):
         self.iou_val = [0, 0, 0]
         # self.candidates_iou25 = {}
         # self.candidates_iou50 = {}
-        if self.epoch_count >= self.hparams.cfg.model.disturbation_start_epoch:
-            self.transformer.start_disturb()
+        # if self.epoch_count >= self.hparams.cfg.model.disturbation_start_epoch:
+        #     self.transformer.start_disturb()
 
     def test_step(self, data_dict, idx):
-        if self.transformer.disturb:
-            self.transformer.disable_disturb()
+        # if self.transformer.disturb:
+        #     self.transformer.disable_disturb()
         # prepare input and forward
         Match_scores = self.transformer.feed_VG(data_dict)     
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -273,12 +273,12 @@ class Joint_Light(pl.LightningModule):
             )
 
     def on_test_epoch_end(self):
-        # print("Unique IOU25:", self.unique_iou[0] / self.unique_iou[2])
-        # print("Unique IOU50:", self.unique_iou[1] / self.unique_iou[2])
-        # print("Multiple IOU25:", self.multiple_iou[0] / self.multiple_iou[2])
-        # print("Multiple IOU50:", self.multiple_iou[1] / self.multiple_iou[2])
-        # print("Overall IOU25:", (self.unique_iou[0]+self.multiple_iou[0]) / (self.unique_iou[2]+self.multiple_iou[2]))
-        # print("Overall IOU50:", (self.unique_iou[1]+self.multiple_iou[1]) / (self.unique_iou[2]+self.multiple_iou[2]))
+        print("Unique IOU25:", self.unique_iou[0] / self.unique_iou[2])
+        print("Unique IOU50:", self.unique_iou[1] / self.unique_iou[2])
+        print("Multiple IOU25:", self.multiple_iou[0] / self.multiple_iou[2])
+        print("Multiple IOU50:", self.multiple_iou[1] / self.multiple_iou[2])
+        print("Overall IOU25:", (self.unique_iou[0]+self.multiple_iou[0]) / (self.unique_iou[2]+self.multiple_iou[2]))
+        print("Overall IOU50:", (self.unique_iou[1]+self.multiple_iou[1]) / (self.unique_iou[2]+self.multiple_iou[2]))
         all_pred_verts = []
         all_gt_verts = []
         all_scan_desc_ids = []

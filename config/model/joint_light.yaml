@@ -2,9 +2,9 @@
 
 ckpt_path: null
 augs_per_scene: 16
-num_descriptions: 1
+num_descriptions: 20
 samples_per_proposal: 48
-disturbation_start_epoch: 30
+disturbation_start_epoch: 10000
 
 logger:
   # https://pytorch-lightning.readthedocs.io/en/stable/extensions/generated/pytorch_lightning.loggers.WandbLogger.html
@@ -18,16 +18,16 @@ trainer:
   devices: auto
   strategy: ddp_find_unused_parameters_true
   num_nodes: 1
-  max_epochs: 300
-  num_sanity_val_steps: 10
-  check_val_every_n_epoch: 10
+  max_epochs: 220
+  num_sanity_val_steps: 5
+  check_val_every_n_epoch: 5
   profiler: simple
 
 # https://pytorch-lightning.readthedocs.io/en/stable/api/pytorch_lightning.callbacks.ModelCheckpoint.html
 checkpoint_monitor:
   _target_: pytorch_lightning.callbacks.ModelCheckpoint
   save_top_k: -1
-  every_n_epochs: 10 #${model.trainer.check_val_every_n_epoch}
+  every_n_epochs: 5 #${model.trainer.check_val_every_n_epoch}
   filename: "{epoch}"
   dirpath: ${exp_output_root_path}/training
 

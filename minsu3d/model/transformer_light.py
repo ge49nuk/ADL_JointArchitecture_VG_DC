@@ -12,37 +12,37 @@ from minsu3d.capeval.eval_helper import prepare_corpus
 
 ROOT_DIR = os.path.abspath(os.curdir)
 
-class PositionalEncoder(nn.Module):
-    def __init__(self, dim_model, dropout_p, max_len):
-        super().__init__()
-        # dim_model: the embedding dimension
-        # max_len: the max. length of the incoming sequence
+# class PositionalEncoder(nn.Module):
+#     def __init__(self, dim_model, dropout_p, max_len):
+#         super().__init__()
+#         # dim_model: the embedding dimension
+#         # max_len: the max. length of the incoming sequence
         
-        self.dropout = nn.Dropout(dropout_p)
+#         self.dropout = nn.Dropout(dropout_p)
         
-        # Encoding - From formula
-        pos_encoding = torch.zeros(max_len, dim_model)
-        positions_list = torch.arange(0, max_len, dtype=torch.float).view(-1, 1) # 0, 1, 2, 3, 4, 5
-        division_term = torch.exp(torch.arange(0, dim_model, 2).float() * (-math.log(10000.0)) / dim_model) # 1000^(2i/dim_model)
+#         # Encoding - From formula
+#         pos_encoding = torch.zeros(max_len, dim_model)
+#         positions_list = torch.arange(0, max_len, dtype=torch.float).view(-1, 1) # 0, 1, 2, 3, 4, 5
+#         division_term = torch.exp(torch.arange(0, dim_model, 2).float() * (-math.log(10000.0)) / dim_model) # 1000^(2i/dim_model)
         
-        # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
-        pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
+#         # PE(pos, 2i) = sin(pos/1000^(2i/dim_model))
+#         pos_encoding[:, 0::2] = torch.sin(positions_list * division_term)
         
-        # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
-        pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
+#         # PE(pos, 2i + 1) = cos(pos/1000^(2i/dim_model))
+#         pos_encoding[:, 1::2] = torch.cos(positions_list * division_term)
         
-        # Saving buffer (same as parameter without gradients needed)
-        pos_encoding = pos_encoding.unsqueeze(0) # For batched input
-        self.register_buffer("pos_encoding", pos_encoding)
+#         # Saving buffer (same as parameter without gradients needed)
+#         pos_encoding = pos_encoding.unsqueeze(0) # For batched input
+#         self.register_buffer("pos_encoding", pos_encoding)
         
-    def forward(self, token_embedding: torch.tensor) -> torch.tensor:
-        # token_embedding: size(batch, sequence_len, dim_emb)
-        # Residual connection + pos encoding
-        return self.dropout(token_embedding + self.pos_encoding)
+#     def forward(self, token_embedding: torch.tensor) -> torch.tensor:
+#         # token_embedding: size(batch, sequence_len, dim_emb)
+#         # Residual connection + pos encoding
+#         return self.dropout(token_embedding + self.pos_encoding)
 
     
 class Transformer_Light(nn.Module):
-    def __init__(self, dim_model=512, dim_ptfeats=1536, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.2, nhead=1, nlayers=2):
+    def __init__(self, dim_model=900, dim_ptfeats=1536, dim_wdfeats=768, max_text_len=134, num_cls=18, size_vocab=30522, dropout_p=0.2, nhead=1, nlayers=3):
         super().__init__()
 
         self.model_type = "Transformer"
@@ -62,8 +62,8 @@ class Transformer_Light(nn.Module):
             nn.Linear(self.dim_wdfeats, self.dim_model)
         )
         # Transformer encoder
-        self.positional_encoder = PositionalEncoder(self.dim_model, dropout_p, max_text_len) # Not 100% sure correct
-        encoder_layer = nn.TransformerEncoderLayer(d_model=self.dim_model, nhead=nhead)
+        # self.positional_encoder = PositionalEncoder(self.dim_model, dropout_p, max_text_len)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.dim_model, nhead=nhead, dropout=dropout_p)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
         # Decoder layer: One score for each box token
         self.grdhead = nn.Sequential(
@@ -72,8 +72,7 @@ class Transformer_Light(nn.Module):
         )
         # Decoder layer: (#Vocab) scores for each text token
         self.caphead = nn.Sequential(
-            nn.Linear(self.dim_model, dim_wdfeats),
-            nn.Linear(dim_wdfeats, self.size_vocab)
+            nn.Linear(self.dim_model, self.size_vocab)
         )
         # Decoder layer: (#Classes) scores for each [CLS] token
         self.clshead = nn.Sequential(
@@ -83,7 +82,7 @@ class Transformer_Light(nn.Module):
 
         # Define loss criterion
         self.loss_criterion_VG = nn.CrossEntropyLoss()
-        self.loss_criterion_DC = nn.CrossEntropyLoss()
+        self.loss_criterion_DC = nn.CrossEntropyLoss(label_smoothing=0.1)
         # self.loss_criterion_bce = nn.BCEWithLogitsLoss()
         
         # Initialize weights
@@ -121,7 +120,7 @@ class Transformer_Light(nn.Module):
             with open(corpus_val_path) as f:
                 self.corpus_val = json.load(f)
         
-        self.disturb = False
+        # self.disturb = False
 
     def forward(self, data_dict):
         instances = data_dict['instances']
@@ -136,7 +135,7 @@ class Transformer_Light(nn.Module):
         # Transform point features and text embedding to have dim_model
         instances = self.instance_to_model(instances)
         text_embeddings = self.word_to_model(text_embeddings)
-        text_embeddings = self.positional_encoder(text_embeddings)
+        # text_embeddings = self.positional_encoder(text_embeddings)
 
         # Get scenes:
         scenes = torch.tensor_split(instances, scene_splits[1:-1], dim=0)
@@ -155,6 +154,7 @@ class Transformer_Light(nn.Module):
         cands = {}
         gts = {}
         refs = {}
+        compute_cider_loss = False
 
         for i, scene in enumerate(scenes):
             num_proposals = num_instances[i]
@@ -185,72 +185,84 @@ class Transformer_Light(nn.Module):
             CLS_scores = self.clshead(encoded_cls_token)
             CLS_scores_list.append(CLS_scores)
             CLS_loss += self.loss_criterion_VG(CLS_scores, target_classes[i])
-            
-            key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
-            if key not in cands:
-                cands[key] = []
-                gts[key] = []
-            if key in self.corpus_train:
-                refs[key] = self.corpus_train[key]
-            else:
-                refs[key] = self.corpus_val[key]
+
             # Dense Captioning pass
-            for target_proposal in best_proposals[i]:
-                target_box_token = box_tokens[target_proposal]
-                target_box_token = target_box_token.view(1, self.dim_model)
-                captioning_cue = text_tokens + target_box_token
-                assert captioning_cue.size() == (len_text_tokens, self.dim_model)
-                DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
-                assert DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
-                mask = self.get_seq2seq_mask(num_proposals, len_text_tokens)
-                output_DC_tokens = self.transformer_encoder(DC_tokens, mask.to("cuda"))
-                output_text_tokens = output_DC_tokens[num_proposals:]
-                assert output_text_tokens.size() == (len_text_tokens, self.dim_model)
-                DC_scores = self.caphead(output_text_tokens)
+            gt_ids = target_word_ids[i][1:(len_text_tokens+1)]
+            if gt_ids[1] == 2003: # Only train with e.g. "this is ..." or "it is ..."
+                compute_cider_loss = True
+                key = "{}|{}|{}".format(data_dict["scene_ids"][i], data_dict["object_ids"][i], data_dict["object_names"][i])
+                if key not in cands:
+                    cands[key] = []
+                    gts[key] = []
+                if key in self.corpus_train:
+                    refs[key] = self.corpus_train[key]
+                else:
+                    refs[key] = self.corpus_val[key]
                 
-                # Disturb the input and feed the transformer again
-                if self.disturb:
-                    predicted_ids = DC_scores.argmax(dim=-1)
-                    # replaced_idx = random.randint(1, len_text_tokens)
-                    maxlen = min(len_text_tokens, 15)
-                    replaced_idx = random.randint(1, maxlen)
-                    new_input_ids = target_word_ids[i]
-                    new_input_ids[replaced_idx] = predicted_ids[replaced_idx - 1]
-                    new_input_embs = self.word_to_model(self.bert(torch.stack([new_input_ids]))[0])
-                    new_text_tokens = self.positional_encoder(new_input_embs)[0][:len_text_tokens]
-                    new_captioning_cue = new_text_tokens + target_box_token
-                    assert new_captioning_cue.size() == (len_text_tokens, self.dim_model)
-                    new_DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
-                    assert new_DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
+                for target_proposal in best_proposals[i]:
+                    target_box_token = box_tokens[target_proposal]
+                    target_box_token = target_box_token.view(1, self.dim_model)
+                    captioning_cue = text_tokens + target_box_token
+                    assert captioning_cue.size() == (len_text_tokens, self.dim_model)
+                    DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
+                    assert DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
                     mask = self.get_seq2seq_mask(num_proposals, len_text_tokens)
-                    new_output_DC_tokens = self.transformer_encoder(new_DC_tokens, mask.to("cuda"))
-                    new_output_text_tokens = new_output_DC_tokens[num_proposals:]
-                    assert new_output_text_tokens.size() == (len_text_tokens, self.dim_model)
-                    DC_scores = self.caphead(new_output_text_tokens)
-                
-                DC_scores_list.append(DC_scores)
-                # Compute CE loss
-                assert DC_scores.size() == (len_text_tokens, self.size_vocab)
-                DC_loss += self.loss_criterion_DC(DC_scores, target_word_ids[i][1:(len_text_tokens+1)])
-                # Compute Cider loss
-                predicted_ids = DC_scores.argmax(dim=-1)
-                predicted_tokens = self.tokenizer.convert_ids_to_tokens(predicted_ids)
-                predicted_str = self.tokenizer.convert_tokens_to_string(predicted_tokens)
-                predicted_str = predicted_str.replace('[SEP]', '.')
-                predicted_str = predicted_str.replace(' \' s ', ' \'s ')
-                candidate_descr = "sos " + predicted_str + " eos"
-                gt_ids = target_word_ids[i][1:(len_text_tokens+1)]
-                gt_tokens = self.tokenizer.convert_ids_to_tokens(gt_ids)
-                gt_str = self.tokenizer.convert_tokens_to_string(gt_tokens)
-                gt_str = gt_str.replace('[SEP]', '.')
-                gt_str = gt_str.replace(' \' s ', ' \'s ')
-                gt_descr = "sos " + gt_str + " eos"
-                cands[key].append(candidate_descr)
-                gts[key].append(gt_descr)
+                    output_DC_tokens = self.transformer_encoder(DC_tokens, mask.to("cuda"))
+                    output_text_tokens = output_DC_tokens[num_proposals:]
+                    assert output_text_tokens.size() == (len_text_tokens, self.dim_model)
+                    DC_scores = self.caphead(output_text_tokens)
+                    
+                    # # Disturb the input and feed the transformer again
+                    # if self.disturb:
+                    #     predicted_ids = DC_scores.argmax(dim=-1)
+                    #     # replaced_idx = random.randint(1, len_text_tokens)
+                    #     maxlen = min(len_text_tokens, 15)
+                    #     replaced_idx = random.randint(1, maxlen)
+                    #     new_input_ids = target_word_ids[i]
+                    #     new_input_ids[replaced_idx] = predicted_ids[replaced_idx - 1]
+                    #     new_input_embs = self.word_to_model(self.bert(torch.stack([new_input_ids]))[0])
+                    #     new_text_tokens = self.positional_encoder(new_input_embs)[0][:len_text_tokens]
+                    #     new_captioning_cue = new_text_tokens + target_box_token
+                    #     assert new_captioning_cue.size() == (len_text_tokens, self.dim_model)
+                    #     new_DC_tokens = torch.cat((box_tokens, captioning_cue), dim=0)
+                    #     assert new_DC_tokens.size() == (num_proposals + len_text_tokens, self.dim_model)
+                    #     mask = self.get_seq2seq_mask(num_proposals, len_text_tokens)
+                    #     new_output_DC_tokens = self.transformer_encoder(new_DC_tokens, mask.to("cuda"))
+                    #     new_output_text_tokens = new_output_DC_tokens[num_proposals:]
+                    #     assert new_output_text_tokens.size() == (len_text_tokens, self.dim_model)
+                    #     DC_scores = self.caphead(new_output_text_tokens)
+                    
+                    DC_scores_list.append(DC_scores)
+                    # Compute CE loss
+                    assert DC_scores.size() == (len_text_tokens, self.size_vocab)
+                    DC_loss += self.loss_criterion_DC(DC_scores, target_word_ids[i][1:(len_text_tokens+1)])
+                    # Compute Cider loss
+                    predicted_ids = DC_scores.argmax(dim=-1)
+                    predicted_tokens = self.tokenizer.convert_ids_to_tokens(predicted_ids)
+                    predicted_str = self.tokenizer.convert_tokens_to_string(predicted_tokens)
+                    predicted_str = predicted_str.replace('[SEP]', '.')
+                    predicted_str = predicted_str.replace(' \' s ', ' \'s ')
+                    candidate_descr = "sos " + predicted_str + " eos"
+                    gt_ids = target_word_ids[i][1:(len_text_tokens+1)]
+                    gt_tokens = self.tokenizer.convert_ids_to_tokens(gt_ids)
+                    gt_str = self.tokenizer.convert_tokens_to_string(gt_tokens)
+                    gt_str = gt_str.replace('[SEP]', '.')
+                    gt_str = gt_str.replace(' \' s ', ' \'s ')
+                    gt_descr = "sos " + gt_str + " eos"
+                    cands[key].append(candidate_descr)
+                    gts[key].append(gt_descr)
         
-        cider_score = capcider.Cider().compute_score(refs, cands)[0]
-        base_score = capcider.Cider().compute_score(refs, gts)[0]
-        Cider_loss = base_score - cider_score
+        if compute_cider_loss:
+            cider_score = capcider.Cider().compute_score(refs, cands)[0]
+            base_score = capcider.Cider().compute_score(refs, gts)[0]
+            Cider_loss = base_score - cider_score
+        else:
+            Cider_loss = 0.0
+
+        # with open("cands.json", "w") as f:
+        #     json.dump(cands, f, indent=4)
+        # with open("gts.json", "w") as f:
+        #     json.dump(gts, f, indent=4)
         
         Match_loss /= num_scenes
         CLS_loss /= num_scenes
@@ -331,6 +343,27 @@ class Transformer_Light(nn.Module):
         target_box_token = box_tokens[target_proposal]
         target_box_token = target_box_token.view(1, self.dim_model)
 
+
+        # class_names = [ 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'shelf', 'picture', 'counter', 
+        #                'desk', 'curtain', 'refrigerator', 'toilet', 'sink', 'bathtub' ]
+        # class_ids = self.tokenizer.convert_tokens_to_ids(class_names)
+
+        # empty_cap1 = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
+        # empty_cap1[0] = "[CLS]"
+        # empty_cap1[1] = "this"
+        # empty_cap1[2] = "is"
+        # empty_cap1[3] = "a"
+        # # empty_cap2 = empty_cap1
+        # # empty_cap2[1] = "it"
+        # # empty_cap3 = empty_cap1
+        # # empty_cap3[1] = "there"
+        # empty_cap1 = self.tokenizer.convert_tokens_to_ids(empty_cap1)
+        # # empty_cap2 = self.tokenizer.convert_tokens_to_ids(empty_cap2)
+        # # empty_cap3 = self.tokenizer.convert_tokens_to_ids(empty_cap3)
+        # best_pasts = torch.tensor([empty_cap1]).to('cuda') # Tracking the best past word sequences (in word ids)
+        # best_past_embs = self.word_to_model(self.bert(best_pasts)[0])
+        # best_probs = [1.0] # Scores of best past sequences
+
         empty_cap = np.array(["[PAD]"] * 134, dtype=np.dtype('U15'))
         empty_cap[0] = "[CLS]"
         empty_cap = self.tokenizer.convert_tokens_to_ids(empty_cap)
@@ -358,7 +391,7 @@ class Transformer_Light(nn.Module):
                 DC_scores = self.caphead(output_text_tokens)
                 assert DC_scores.size() == (len_text_tokens, self.size_vocab)
 
-                # Select 100 words with highest scores
+                # Select words with highest scores
                 next_word_scores = DC_scores[l]
                 
                 last_id = past[l]
@@ -370,10 +403,14 @@ class Transformer_Light(nn.Module):
                         third_last_id = past[l-2]
                         next_word_scores[third_last_id] = 0 # Not predict the same third last word
                 
-                _, top_ids = torch.topk(next_word_scores, 8, sorted=False) # Select the best next words
+
+                sm = nn.Softmax(dim=-1)
+                next_word_scores = sm(next_word_scores)
+                
+                _, top_ids = torch.topk(next_word_scores, 20, sorted=False) # Select the best next words
                 top_scores = next_word_scores[top_ids]
                 top_scores = top_scores + 0.3 * best_scores[j] # Accumulate past score
-                new_best_pasts = torch.stack([past for k in range(8)])
+                new_best_pasts = torch.stack([past for k in range(20)])
                 new_best_pasts[:, l+1] = top_ids
 
                 tmp_best_pasts.append(new_best_pasts)
@@ -393,12 +430,12 @@ class Transformer_Light(nn.Module):
                 candidate_descr = "sos " + predicted_str + " eos"
                 caption = candidate_descr
                 break
-            num_best = min(new_best_pasts.shape[0], 32)
+            num_best = min(new_best_pasts.shape[0], 80)
             _, best_indices = torch.topk(best_scores, num_best, sorted=False) # Select the best sequences
             best_pasts = new_best_pasts[best_indices] 
             best_past_embs = self.bert(best_pasts)[0]
             best_past_embs = self.word_to_model(best_past_embs)
-            best_past_embs = self.positional_encoder(best_past_embs)
+            # best_past_embs = self.positional_encoder(best_past_embs)
                 
         return caption
     
