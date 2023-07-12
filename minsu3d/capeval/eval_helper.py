@@ -10,7 +10,7 @@ import minsu3d.capeval.rouge.rouge as caprouge
 import minsu3d.capeval.meteor.meteor as capmeteor
 
 
-def prepare_corpus(raw_data, max_len=132):
+def prepare_corpus(raw_data, max_len=30):
     corpus = {}
     for data in raw_data:
         scene_id = data["scene_id"]
@@ -53,7 +53,7 @@ def organize_candidates(corpus, candidates):
     return new_candidates
 
 
-def eval_cap(cfg, candidates_iou25, candidates_iou50, force=False, max_len=132):
+def eval_cap(cfg, candidates_iou25, candidates_iou50, force=True, max_len=30):
     
     # corpus
     corpus_path = os.path.join(cfg.data.dataset_root_path, "corpus_val.json")

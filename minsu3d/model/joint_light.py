@@ -30,7 +30,7 @@ class Joint_Light(pl.LightningModule):
         self.candidates_iou25 = {}
         self.candidates_iou50 = {}
 
-        # self.epoch_count = 0
+        self.epoch_count = 0
 
         self.unique_multiple_lookup = _get_unique_multiple_lookup(self.hparams.cfg)
         self.unique_iou = [0,0,0] # <- iou25 iou50 total
@@ -67,7 +67,6 @@ class Joint_Light(pl.LightningModule):
     def forward(self, data_dict):
         # Transformer
         transformer_out = self.transformer(data_dict)
-        # print(torch.max(transformer_out["DC_scores"][0], dim=1))
         return transformer_out
 
 
@@ -76,7 +75,6 @@ class Joint_Light(pl.LightningModule):
         losses["Match_loss"] = output_dict["Match_loss"]
         losses["CLS_loss"] = output_dict["CLS_loss"]
         losses["DC_loss"] = output_dict["DC_loss"]
-        losses["Cider_loss"] = output_dict["Cider_loss"]
         return losses
     
     
@@ -84,7 +82,7 @@ class Joint_Light(pl.LightningModule):
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
         total_loss = 0
-        batch_size = len(output_dict["Match_scores"])
+        batch_size = len(data_dict['target_classes'])
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
             self.log(f"train/{loss_name}", loss_value, prog_bar=True, on_step=False, sync_dist=True, on_epoch=True, batch_size=batch_size)
@@ -105,6 +103,9 @@ class Joint_Light(pl.LightningModule):
                 if torch.argmax(output_dict["Match_scores"][bi]) in best_proposals[bi]:
                     self.correct_guesses_train[0] += 1
         
+        if total_loss == 0:
+            return None
+        
         return total_loss
     
     # def on_train_epoch_end(self):
@@ -114,17 +115,18 @@ class Joint_Light(pl.LightningModule):
     #     )
 
     def validation_step(self, data_dict, idx):
-        # if self.transformer.disturb:
-        #     self.transformer.disable_disturb()
         output_dict = self(data_dict)
         losses = self._loss(output_dict)
-        batch_size = len(output_dict["Match_scores"])
+        batch_size = len(data_dict['target_classes'])
 
         # log losses
         total_loss = 0
         for loss_name, loss_value in losses.items():
             total_loss += loss_value
-            self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
+            if loss_name == 'DC_loss':
+                self.log(f"val/{loss_name}", loss_value, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
+            else:
+                self.log(f"val/{loss_name}", loss_value, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
         self.log("val/total_loss", total_loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size)
 
         # Log correct guesses
@@ -151,9 +153,10 @@ class Joint_Light(pl.LightningModule):
             train_acc = self.correct_guesses_train[0]/self.correct_guesses_train[1]
             self.log("train/acc", train_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         self.correct_guesses_train = [0,0]
-        # self.epoch_count += 1
-        # if self.epoch_count == self.hparams.cfg.model.disturbation_start_epoch:
-        #     self.transformer.start_disturb()
+
+        self.epoch_count += 1
+        if self.epoch_count >= self.hparams.cfg.model.disturbation_start_epoch:
+            self.transformer.start_disturb()
     
     def on_validation_epoch_end(self):
         if not self.correct_guesses_val[1] == 0.0:
@@ -162,48 +165,11 @@ class Joint_Light(pl.LightningModule):
             iou50 = self.iou_val[1]/self.iou_val[2]
             self.log("val/acc", val_acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
             print("\nIOU25(val):", iou25, "IOU50(val):", iou50, "\n")
-        
-        # bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
-
-        # folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'val_scores')
-        # os.makedirs(folder_path, exist_ok=True)
-        # score_path = os.path.join(folder_path, "epoch_{}.json".format(self.epoch_count))
-        # self.epoch_count += 10
-
-        # scores = {
-        #         "iou25": iou25,
-        #         "iou50": iou50,
-        #         "bleu4_iou25": bleu4[0],
-        #         "cider_iou25": cider[0],
-        #         "rouge_iou25": rouge[0],
-        #         "meteor_iou25": meteor[0],
-        #         "bleu4_iou50": bleu4[1],
-        #         "cider_iou50": cider[1],
-        #         "rouge_iou50": rouge[1],
-        #         "meteor_iou50": meteor[1]
-        #         }
-        # with open(score_path, "w") as f:
-        #     json.dump(scores, f, indent=4)
-
-        # self.log("val/bleu4_iou25", bleu4[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/cider_iou25", cider[0], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/rouge_iou25", rouge[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/meteor_iou25", meteor[0], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/bleu4_iou50", bleu4[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/cider_iou50", cider[1], prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/rouge_iou50", rouge[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
-        # self.log("val/meteor_iou50", meteor[1], prog_bar=False, on_step=False, on_epoch=True, sync_dist=True)
 
         self.correct_guesses_val = [0, 0]
         self.iou_val = [0, 0, 0]
-        # self.candidates_iou25 = {}
-        # self.candidates_iou50 = {}
-        # if self.epoch_count >= self.hparams.cfg.model.disturbation_start_epoch:
-        #     self.transformer.start_disturb()
 
     def test_step(self, data_dict, idx):
-        # if self.transformer.disturb:
-        #     self.transformer.disable_disturb()
         # prepare input and forward
         Match_scores = self.transformer.feed_VG(data_dict)     
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -304,7 +270,7 @@ class Joint_Light(pl.LightningModule):
             )
             self.print(f"\nPredictions saved at {os.path.abspath(save_dir)}")
 
-        # F1 scores
+        # Recall scores
         bleu4, cider, rouge, meteor = eval_cap(self.hparams.cfg, self.candidates_iou25, self.candidates_iou50)
 
         folder_path = os.path.join(self.hparams.cfg.exp_output_root_path, 'F1_scores')

@@ -4,7 +4,7 @@ ckpt_path: null
 augs_per_scene: 16
 num_descriptions: 20
 samples_per_proposal: 48
-disturbation_start_epoch: 10000
+disturbation_start_epoch: 50
 
 logger:
   # https://pytorch-lightning.readthedocs.io/en/stable/extensions/generated/pytorch_lightning.loggers.WandbLogger.html
