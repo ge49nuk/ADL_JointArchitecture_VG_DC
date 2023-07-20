@@ -1,7 +1,7 @@
 # Joint Architecture for VG and DC
 This repository is implementing a transformer that learns a joint representation of 3D objects and text descriptions in order to solve the tasks of visual grounding (VG) and dense captioning (DC).
 
-The base for this project was the [Minsu3d](https://github.com/3dlg-hcvc/minsu3d)) repository and their framework for running [SoftGroup](https://github.com/thangvubk/SoftGroup).  
+The base for this project was the [Minsu3d](https://github.com/3dlg-hcvc/minsu3d) repository and their framework for running [SoftGroup](https://github.com/thangvubk/SoftGroup).  
 
 ## Features
 - Highly-modularized design enables researchers to easily add different models and datasets.
